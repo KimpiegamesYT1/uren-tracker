@@ -1,24 +1,25 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   TextInput,
   TouchableOpacity,
+  ScrollView,
   StyleSheet,
   Alert,
   Image,
-  ScrollView,
 } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 
-import { Colors, getCompanyDisplayColor } from '@/constants/colors';
+import { Colors, formatEuro, getCompanyDisplayColor } from '@/constants/colors';
 import { useAppStore } from '@/store/use-app-store';
-import { insertExpense } from '@/db/expenses';
+import { insertExpense, updateExpense, deleteExpense } from '@/db/expenses';
 import { getAllCompanies } from '@/db/companies';
+import { getDb, Expense } from '@/db/schema';
 import { Company } from '@/db/schema';
 import { dateToDateString, dateStringToDate } from '@/utils/rounding';
 import { InAppCamera } from '@/components/in-app-camera';
@@ -33,14 +34,19 @@ async function ensureReceiptsDir() {
   }
 }
 
-export default function ExpenseModalScreen() {
+export default function ExpenseScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const params = useLocalSearchParams<{ date?: string }>();
   const { refreshBalance } = useAppStore();
   const { uiTheme } = useAppColors();
 
-  const initialDate = params.date ? dateStringToDate(params.date) : new Date();
-  const [selectedDate, setSelectedDate] = useState(initialDate);
+  const isNew = !id || id === 'new';
+
+  const [existingExpense, setExistingExpense] = useState<Expense | null>(null);
+  const [isLocked, setIsLocked] = useState(false);
+  const [lockWarningShown, setLockWarningShown] = useState(false);
+
+  const [selectedDate, setSelectedDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(null);
@@ -55,9 +61,45 @@ export default function ExpenseModalScreen() {
     if (loaded.length > 0) {
       setSelectedCompanyId(loaded[0].id);
     }
-  }, []);
+
+    if (!isNew) {
+      const db = getDb();
+      const expense = db.getFirstSync<Expense>('SELECT * FROM expenses WHERE id = ?', [Number(id)]);
+      if (expense) {
+        setExistingExpense(expense);
+        setIsLocked(expense.is_locked === 1);
+        setSelectedDate(dateStringToDate(expense.date));
+        setDescription(expense.description);
+        setAmount(String(expense.amount));
+        setSelectedCompanyId(expense.company_id ?? (loaded[0]?.id ?? null));
+        setReceiptUri(expense.receipt_photo_uri);
+      }
+    }
+  }, [id]);
 
   const handleSave = () => {
+    if (isLocked && !lockWarningShown) {
+      Alert.alert(
+        'Onkost al uitbetaald',
+        'Deze onkostenpost is al uitbetaald. Weet je zeker dat je dit wilt wijzigen? Dit beïnvloedt je openstaande saldo.',
+        [
+          { text: 'Annuleren', style: 'cancel' },
+          {
+            text: 'Toch bewerken',
+            style: 'destructive',
+            onPress: () => {
+              setLockWarningShown(true);
+              doSave();
+            },
+          },
+        ]
+      );
+      return;
+    }
+    doSave();
+  };
+
+  const doSave = () => {
     const parsedAmount = parseFloat(amount.replace(',', '.'));
     if (!description.trim()) {
       Alert.alert('Beschrijving vereist', 'Voer een beschrijving in.');
@@ -68,18 +110,43 @@ export default function ExpenseModalScreen() {
       return;
     }
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
-      Alert.alert('Ongeldig bedrag', 'Voer een geldig positief bedrag in.');
+      Alert.alert('Ongeldig bedrag', 'Voer een geldig bedrag in.');
       return;
     }
-    insertExpense(
-      dateToDateString(selectedDate),
-      selectedCompanyId,
-      description.trim(),
-      parsedAmount,
-      receiptUri
-    );
+    const dateStr = dateToDateString(selectedDate);
+
+    if (isNew) {
+      insertExpense(dateStr, selectedCompanyId, description.trim(), parsedAmount, receiptUri);
+    } else if (existingExpense) {
+      updateExpense(existingExpense.id, dateStr, selectedCompanyId, description.trim(), parsedAmount, receiptUri);
+      // If was locked and now edited, reset lock so saldo recalculates on next payment
+      if (isLocked) {
+        const db = getDb();
+        db.runSync('UPDATE expenses SET is_locked = 0 WHERE id = ?', [existingExpense.id]);
+      }
+    }
     refreshBalance();
     router.back();
+  };
+
+  const handleDelete = () => {
+    if (!existingExpense) return;
+    Alert.alert(
+      'Onkost verwijderen',
+      'Weet je zeker dat je deze onkostenpost wilt verwijderen?',
+      [
+        { text: 'Annuleren', style: 'cancel' },
+        {
+          text: 'Verwijderen',
+          style: 'destructive',
+          onPress: () => {
+            deleteExpense(existingExpense.id);
+            refreshBalance();
+            router.back();
+          },
+        },
+      ]
+    );
   };
 
   const handleCameraCapture = async (sourceUri: string) => {
@@ -111,9 +178,15 @@ export default function ExpenseModalScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        {isLocked && (
+          <View style={styles.lockBanner}>
+            <Text style={styles.lockBannerText}>🔒 Deze onkost is al uitbetaald</Text>
+          </View>
+        )}
+
         <TouchableOpacity style={styles.dateButton} onPress={() => setShowDatePicker(true)}>
           <Text style={styles.dateButtonText}>
-            {selectedDate.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' })}
+            {selectedDate.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
           </Text>
         </TouchableOpacity>
         {showDatePicker && (
@@ -126,7 +199,6 @@ export default function ExpenseModalScreen() {
           placeholderTextColor={Colors.textDisabled}
           value={description}
           onChangeText={setDescription}
-          autoFocus
         />
 
         <Text style={styles.sectionLabel}>Bedrijf</Text>
@@ -168,15 +240,16 @@ export default function ExpenseModalScreen() {
           onChangeText={setAmount}
         />
 
+        {/* Receipt photo */}
         {receiptUri ? (
           <View style={styles.receiptContainer}>
             <Image source={{ uri: receiptUri }} style={styles.receiptImage} resizeMode="cover" />
             <View style={styles.receiptActions}>
-              <TouchableOpacity onPress={handleSharePhoto} style={styles.shareBtn}>
-                <Text style={styles.shareText}>Deel foto</Text>
+              <TouchableOpacity style={styles.sharePhotoButton} onPress={handleSharePhoto}>
+                <Text style={styles.sharePhotoText}>Deel foto</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => setReceiptUri(null)} style={styles.removeBtn}>
-                <Text style={styles.removeText}>Foto verwijderen</Text>
+              <TouchableOpacity style={styles.removePhotoButton} onPress={() => setReceiptUri(null)}>
+                <Text style={styles.removePhotoText}>Foto verwijderen</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -187,12 +260,14 @@ export default function ExpenseModalScreen() {
         )}
 
         <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-          <Text style={styles.saveButtonText}>Onkost Opslaan</Text>
+          <Text style={styles.saveButtonText}>Opslaan</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.cancelButton} onPress={() => router.back()}>
-          <Text style={styles.cancelButtonText}>Annuleren</Text>
-        </TouchableOpacity>
+        {!isNew && (
+          <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
+            <Text style={styles.deleteButtonText}>Onkost verwijderen</Text>
+          </TouchableOpacity>
+        )}
       </ScrollView>
 
       <InAppCamera
@@ -208,8 +283,21 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.bg },
   content: { padding: 16, gap: 12, paddingBottom: 40 },
 
-  dateButton: { backgroundColor: Colors.surface, borderRadius: 10, padding: 14 },
-  dateButtonText: { color: Colors.textPrimary, fontSize: 15, textTransform: 'capitalize' },
+  lockBanner: {
+    backgroundColor: Colors.surfaceElevated,
+    borderRadius: 8,
+    padding: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.warning,
+  },
+  lockBannerText: { color: Colors.warning, fontWeight: '600' },
+
+  dateButton: {
+    backgroundColor: Colors.surface,
+    borderRadius: 10,
+    padding: 14,
+  },
+  dateButtonText: { color: Colors.textPrimary, fontSize: 15 },
 
   input: {
     backgroundColor: Colors.surface,
@@ -245,10 +333,10 @@ const styles = StyleSheet.create({
   receiptContainer: { gap: 8 },
   receiptImage: { width: '100%', height: 200, borderRadius: 10 },
   receiptActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  shareBtn: { padding: 8 },
-  shareText: { color: Colors.accentSecondary, fontSize: 14, fontWeight: '600' },
-  removeBtn: { alignItems: 'center', padding: 8 },
-  removeText: { color: Colors.error, fontSize: 14 },
+  sharePhotoButton: { padding: 8 },
+  sharePhotoText: { color: Colors.accentSecondary, fontSize: 14, fontWeight: '600' },
+  removePhotoButton: { alignItems: 'center', padding: 8 },
+  removePhotoText: { color: Colors.error, fontSize: 14 },
 
   saveButton: {
     backgroundColor: Colors.accentSecondary,
@@ -259,6 +347,12 @@ const styles = StyleSheet.create({
   },
   saveButtonText: { color: '#FFF', fontWeight: '700', fontSize: 16 },
 
-  cancelButton: { padding: 14, alignItems: 'center' },
-  cancelButtonText: { color: Colors.textSecondary, fontSize: 15 },
+  deleteButton: {
+    borderWidth: 1,
+    borderColor: Colors.error,
+    borderRadius: 10,
+    padding: 14,
+    alignItems: 'center',
+  },
+  deleteButtonText: { color: Colors.error, fontWeight: '600', fontSize: 15 },
 });
