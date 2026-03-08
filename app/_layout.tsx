@@ -21,15 +21,17 @@ export default function RootLayout() {
   const systemScheme = useColorScheme();
 
   const resolvedTheme = appTheme === 'system' ? (systemScheme === 'dark' ? 'dark' : 'light') : appTheme;
-  const navTheme = resolvedTheme === 'dark' ? DarkTheme : DefaultTheme;
   const uiColors = resolvedTheme === 'dark' ? DarkColors : LightColors;
+  const navTheme = resolvedTheme === 'dark' 
+    ? { ...DarkTheme, colors: { ...DarkTheme.colors, background: uiColors.bg } }
+    : { ...DefaultTheme, colors: { ...DefaultTheme.colors, background: uiColors.bg } };
 
   useEffect(() => {
     initDatabase();
     loadCompanies();
     loadSettings();
     refreshBalance();
-  }, []);
+  }, [loadCompanies, loadSettings, refreshBalance]);
 
   return (
     <ThemeProvider value={navTheme}>

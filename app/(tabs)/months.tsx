@@ -25,10 +25,13 @@ export default function MonthsScreen() {
   const { colors } = useAppColors();
   const styles = getStyles(colors);
   const [summaries, setSummaries] = useState<MonthSummary[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   useFocusEffect(
     useCallback(() => {
+      setIsLoading(true);
       setSummaries(getMonthSummaries());
+      setIsLoading(false);
     }, [])
   );
 
@@ -56,7 +59,7 @@ export default function MonthsScreen() {
         renderItem={renderItem}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
-          <Text style={styles.emptyText}>Nog geen diensten geregistreerd.</Text>
+          isLoading ? null : <Text style={styles.emptyText}>Nog geen diensten geregistreerd.</Text>
         }
       />
     </SafeAreaView>
@@ -81,15 +84,13 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
   },
   cardLeft: { gap: 2 },
   cardMonth: { color: colors.textPrimary, fontSize: 20, fontWeight: '700' },
   cardYear: { color: colors.textSecondary, fontSize: 14 },
   cardRight: { alignItems: 'flex-end', gap: 2 },
   cardHours: { color: colors.textSecondary, fontSize: 14 },
-  cardAmount: { color: colors.accent, fontSize: 20, fontWeight: '700' },
+  cardAmount: { color: colors.textPrimary, fontSize: 20, fontWeight: '700' },
   emptyText: { color: colors.textSecondary, textAlign: 'center', marginTop: 60, fontSize: 15 },
   });
 }

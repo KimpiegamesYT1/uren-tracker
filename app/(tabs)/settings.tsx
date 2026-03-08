@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   ScrollView,
   StyleSheet,
-  Alert,
   Modal,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
@@ -25,6 +24,7 @@ import { getAllCompanies, insertCompany, updateCompany, deleteCompany } from '@/
 import { Company } from '@/db/schema';
 import { saveExportJSONToFiles, importFromJSON, exportHoursPdf, HoursPdfAction } from '@/utils/backup';
 import { useAppColors } from '@/hooks/use-app-colors';
+import { useDialog } from '@/components/ui/app-dialog';
 import { getMonthSummaries } from '@/db/work-entries';
 
 type CompanyFormState = { name: string; hourlyRate: string; color: string };
@@ -40,6 +40,8 @@ export default function SettingsScreen() {
   const { colors, uiTheme } = useAppColors();
 
   const companyPresets = useMemo(() => getCompanyColorPresets(uiTheme), [uiTheme]);
+
+  const { show: showDialog, dialogNode } = useDialog();
 
   const [companies, setCompanies] = useState<Company[]>([]);
   const [monthSummaries, setMonthSummaries] = useState<MonthSummary[]>([]);
@@ -94,11 +96,11 @@ export default function SettingsScreen() {
   const saveCompany = () => {
     const rate = parseFloat(form.hourlyRate.replace(',', '.'));
     if (!form.name.trim()) {
-      Alert.alert('Naam vereist', 'Voer een bedrijfsnaam in.');
+      showDialog({ title: 'Naam vereist', message: 'Voer een bedrijfsnaam in.' });
       return;
     }
     if (isNaN(rate) || rate < 0) {
-      Alert.alert('Ongeldig tarief', 'Voer een geldig uurtarief in.');
+      showDialog({ title: 'Ongeldig tarief', message: 'Voer een geldig uurtarief in.' });
       return;
     }
 
@@ -114,10 +116,10 @@ export default function SettingsScreen() {
   };
 
   const confirmDeleteCompany = (company: Company) => {
-    Alert.alert(
-      'Bedrijf verwijderen',
-      `Weet je zeker dat je "${company.name}" wilt verwijderen? Bestaande diensten worden niet verwijderd.`,
-      [
+    showDialog({
+      title: 'Bedrijf verwijderen',
+      message: `Weet je zeker dat je "${company.name}" wilt verwijderen? Bestaande diensten worden niet verwijderd.`,
+      buttons: [
         { text: 'Annuleren', style: 'cancel' },
         {
           text: 'Verwijderen',
@@ -128,21 +130,33 @@ export default function SettingsScreen() {
             setCompanies(getAllCompanies());
           },
         },
-      ]
-    );
+      ],
+    });
   };
 
-  const handleExport = async () => {
-    try {
-      const result = await saveExportJSONToFiles();
-      if (!result.success) {
-        Alert.alert('Export geannuleerd', result.message);
-        return;
-      }
-      Alert.alert('Export gelukt', result.message);
-    } catch {
-      Alert.alert('Fout', 'Exporteren naar bestand is mislukt.');
-    }
+  const handleExport = () => {
+    showDialog({
+      title: 'Backup exporteren',
+      message: 'Let op: bonfoto\'s worden niet meegenomen in de backup. Alleen de tekstgegevens worden geëxporteerd.',
+      buttons: [
+        { text: 'Annuleren', style: 'cancel' },
+        {
+          text: 'Exporteren',
+          onPress: async () => {
+            try {
+              const result = await saveExportJSONToFiles();
+              if (!result.success) {
+                showDialog({ title: 'Export geannuleerd', message: result.message });
+                return;
+              }
+              showDialog({ title: 'Export gelukt', message: result.message });
+            } catch {
+              showDialog({ title: 'Fout', message: 'Exporteren naar bestand is mislukt.' });
+            }
+          },
+        },
+      ],
+    });
   };
 
   const handleImport = async () => {
@@ -153,25 +167,29 @@ export default function SettingsScreen() {
       const json = await FileSystem.readAsStringAsync(uri, {
         encoding: FileSystem.EncodingType.UTF8,
       });
-      Alert.alert('Backup importeren', 'Dit overschrijft alle bestaande data. Doorgaan?', [
-        { text: 'Annuleren', style: 'cancel' },
-        {
-          text: 'Importeren',
-          style: 'destructive',
-          onPress: () => {
-            const { success, error } = importFromJSON(json);
-            if (success) {
-              loadCompanies();
-              setCompanies(getAllCompanies());
-              Alert.alert('Klaar', 'Backup succesvol geïmporteerd.');
-            } else {
-              Alert.alert('Fout', error ?? 'Importeren mislukt.');
-            }
+      showDialog({
+        title: 'Backup importeren',
+        message: 'Dit overschrijft alle bestaande data. Doorgaan?',
+        buttons: [
+          { text: 'Annuleren', style: 'cancel' },
+          {
+            text: 'Importeren',
+            style: 'destructive',
+            onPress: () => {
+              const { success, error } = importFromJSON(json);
+              if (success) {
+                loadCompanies();
+                setCompanies(getAllCompanies());
+                showDialog({ title: 'Klaar', message: 'Backup succesvol geïmporteerd.' });
+              } else {
+                showDialog({ title: 'Fout', message: error ?? 'Importeren mislukt.' });
+              }
+            },
           },
-        },
-      ]);
+        ],
+      });
     } catch {
-      Alert.alert('Fout', 'Kon bestand niet lezen.');
+      showDialog({ title: 'Fout', message: 'Kon bestand niet lezen.' });
     }
   };
 
@@ -198,13 +216,13 @@ export default function SettingsScreen() {
 
       const result = await exportHoursPdf(scope, action, settings.userName?.trim() ?? '');
       if (!result.success) {
-        Alert.alert('PDF export geannuleerd', result.message);
+        showDialog({ title: 'PDF export geannuleerd', message: result.message });
         return;
       }
-      Alert.alert('PDF export gelukt', result.message);
+      showDialog({ title: 'PDF export gelukt', message: result.message });
       closeHoursExportModal();
     } catch {
-      Alert.alert('Fout', 'PDF exporteren is mislukt.');
+      showDialog({ title: 'Fout', message: 'PDF exporteren is mislukt.' });
     }
   };
 
@@ -249,16 +267,20 @@ export default function SettingsScreen() {
           </Text>
 
           <Text style={styles.optionLabel}>Stapgrootte</Text>
-          <View style={styles.optionRow}>
-            {([1, 15, 30] as const).map((unit) => (
+          <View style={styles.segmented}>
+            {([1, 15, 30] as const).map((unit, index) => (
               <TouchableOpacity
                 key={unit}
-                style={[styles.optionButton, settings.roundingUnit === unit && styles.optionButtonActive]}
+                style={[
+                  styles.segmentedOption,
+                  index > 0 && styles.segmentedOptionWithSeparator,
+                  settings.roundingUnit === unit && styles.segmentedOptionActive,
+                ]}
                 onPress={() => updateSetting('roundingUnit', unit)}>
                 <Text
                   style={[
-                    styles.optionButtonText,
-                    settings.roundingUnit === unit && styles.optionButtonTextActive,
+                    styles.segmentedOptionText,
+                    settings.roundingUnit === unit && styles.segmentedOptionTextActive,
                   ]}>
                   {unit === 1 ? 'Exact (minuten)' : unit === 15 ? 'Per kwartier' : 'Per half uur'}
                 </Text>
@@ -267,19 +289,20 @@ export default function SettingsScreen() {
           </View>
 
           <Text style={[styles.optionLabel, { marginTop: 14 }]}>Afrondingsmethode</Text>
-          <View style={styles.optionRow}>
-            {(['up', 'down', 'round'] as const).map((direction) => (
+          <View style={styles.segmented}>
+            {(['up', 'down', 'round'] as const).map((direction, index) => (
               <TouchableOpacity
                 key={direction}
                 style={[
-                  styles.optionButton,
-                  settings.roundingDirection === direction && styles.optionButtonActive,
+                  styles.segmentedOption,
+                  index > 0 && styles.segmentedOptionWithSeparator,
+                  settings.roundingDirection === direction && styles.segmentedOptionActive,
                 ]}
                 onPress={() => updateSetting('roundingDirection', direction)}>
                 <Text
                   style={[
-                    styles.optionButtonText,
-                    settings.roundingDirection === direction && styles.optionButtonTextActive,
+                    styles.segmentedOptionText,
+                    settings.roundingDirection === direction && styles.segmentedOptionTextActive,
                   ]}>
                   {direction === 'up'
                     ? 'Altijd omhoog'
@@ -306,7 +329,7 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           </View>
           <Text style={styles.backupNote}>
-            Foto's van bonnetjes worden niet meegenomen in de backup om de bestandsgrootte klein te houden.
+            Foto&apos;s van bonnetjes worden niet meegenomen in de backup om de bestandsgrootte klein te houden.
           </Text>
         </View>
 
@@ -314,7 +337,7 @@ export default function SettingsScreen() {
         <View style={styles.card}>
           <Text style={styles.helperText}>Naam op PDF titel (bijvoorbeeld: Open uren Floris).</Text>
           <TextInput
-            style={styles.input}
+            style={styles.profileInput}
             placeholder="Jouw naam"
             placeholderTextColor={colors.textDisabled}
             value={userNameInput}
@@ -324,7 +347,7 @@ export default function SettingsScreen() {
             style={[styles.backupButton, { marginTop: 10 }]}
             onPress={() => {
               updateSetting('userName', userNameInput.trim());
-              Alert.alert('Opgeslagen', 'Naam voor PDF titel is bijgewerkt.');
+              showDialog({ title: 'Opgeslagen', message: 'Naam voor PDF titel is bijgewerkt.' });
             }}>
             <Text style={styles.backupButtonText}>Naam opslaan</Text>
           </TouchableOpacity>
@@ -332,16 +355,20 @@ export default function SettingsScreen() {
 
         <Text style={styles.sectionTitle}>Thema</Text>
         <View style={styles.card}>
-          <View style={styles.optionRow}>
-            {(['dark', 'light', 'system'] as const).map((theme) => (
+          <View style={styles.segmented}>
+            {(['dark', 'light', 'system'] as const).map((theme, index) => (
               <TouchableOpacity
                 key={theme}
-                style={[styles.optionButton, settings.theme === theme && styles.optionButtonActive]}
+                style={[
+                  styles.segmentedOption,
+                  index > 0 && styles.segmentedOptionWithSeparator,
+                  settings.theme === theme && styles.segmentedOptionActive,
+                ]}
                 onPress={() => updateSetting('theme', theme)}>
                 <Text
                   style={[
-                    styles.optionButtonText,
-                    settings.theme === theme && styles.optionButtonTextActive,
+                    styles.segmentedOptionText,
+                    settings.theme === theme && styles.segmentedOptionTextActive,
                   ]}>
                   {theme === 'dark' ? 'Donker' : theme === 'light' ? 'Licht' : 'Systeem'}
                 </Text>
@@ -447,31 +474,37 @@ export default function SettingsScreen() {
 
       <Modal visible={showHoursExportModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
+          <View style={[styles.modalBox, styles.hoursExportModalBox]}>
             <Text style={styles.modalTitle}>Exporteer uren</Text>
 
             {hoursExportStep === 1 ? (
               <>
                 <Text style={styles.optionLabel}>Stap 1: Welke uren wil je exporteren?</Text>
-                <View style={styles.optionRow}>
+                <View style={[styles.segmented, styles.hoursExportSegmented]}>
                   <TouchableOpacity
-                    style={[styles.optionButton, hoursExportMode === 'open' && styles.optionButtonActive]}
+                    style={[styles.segmentedOption, hoursExportMode === 'open' && styles.segmentedOptionActive]}
                     onPress={() => setHoursExportMode('open')}>
                     <Text
                       style={[
-                        styles.optionButtonText,
-                        hoursExportMode === 'open' && styles.optionButtonTextActive,
+                        styles.segmentedOptionText,
+                        styles.hoursExportOptionText,
+                        hoursExportMode === 'open' && styles.segmentedOptionTextActive,
                       ]}>
                       Open uren
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={[styles.optionButton, hoursExportMode === 'month' && styles.optionButtonActive]}
+                    style={[
+                      styles.segmentedOption,
+                      styles.segmentedOptionWithSeparator,
+                      hoursExportMode === 'month' && styles.segmentedOptionActive,
+                    ]}
                     onPress={() => setHoursExportMode('month')}>
                     <Text
                       style={[
-                        styles.optionButtonText,
-                        hoursExportMode === 'month' && styles.optionButtonTextActive,
+                        styles.segmentedOptionText,
+                        styles.hoursExportOptionText,
+                        hoursExportMode === 'month' && styles.segmentedOptionTextActive,
                       ]}>
                       Van een maand
                     </Text>
@@ -501,7 +534,7 @@ export default function SettingsScreen() {
                   </View>
                 ) : null}
 
-                <View style={styles.modalButtons}>
+                <View style={[styles.modalButtons, styles.hoursExportButtons]}>
                   <TouchableOpacity
                     style={[styles.modalBtn, styles.modalBtnCancel]}
                     onPress={closeHoursExportModal}>
@@ -530,7 +563,7 @@ export default function SettingsScreen() {
                   </TouchableOpacity>
                 </View>
 
-                <View style={styles.modalButtons}>
+                <View style={[styles.modalButtons, styles.hoursExportButtons]}>
                   <TouchableOpacity
                     style={[styles.modalBtn, styles.modalBtnCancel]}
                     onPress={() => setHoursExportStep(1)}>
@@ -547,6 +580,7 @@ export default function SettingsScreen() {
           </View>
         </View>
       </Modal>
+      {dialogNode}
     </SafeAreaView>
   );
 }
@@ -574,9 +608,11 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
     companyRow: {
       flexDirection: 'row',
       alignItems: 'center',
+      backgroundColor: colors.surfaceElevated,
+      borderRadius: 10,
+      paddingHorizontal: 12,
       paddingVertical: 10,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.border,
+      marginBottom: 8,
       gap: 12,
     },
     colorDot: { width: 16, height: 16, borderRadius: 8 },
@@ -596,31 +632,53 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
     },
     addButtonText: { color: colors.accentSecondary, fontWeight: '600', fontSize: 15 },
 
-    helperText: { color: colors.textSecondary, fontSize: 13, marginBottom: 12 },
-    optionLabel: { color: colors.textSecondary, fontSize: 13, marginBottom: 8 },
-    optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-    optionButton: {
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: 8,
-      paddingVertical: 8,
-      paddingHorizontal: 14,
+    helperText: { color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: 12 },
+    optionLabel: { color: colors.textDisabled, fontSize: 13, marginBottom: 8 },
+    optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+    segmented: {
+      flexDirection: 'row',
       backgroundColor: colors.surfaceElevated,
+      borderRadius: 12,
+      overflow: 'hidden',
+    },
+    hoursExportSegmented: {
+      backgroundColor: colors.surface,
+    },
+    segmentedOption: {
+      flex: 1,
+      alignItems: 'center',
+      paddingVertical: 10,
+      paddingHorizontal: 8,
+      minHeight: 42,
+      justifyContent: 'center',
+    },
+    segmentedOptionWithSeparator: {
+      borderLeftWidth: StyleSheet.hairlineWidth,
+      borderLeftColor: colors.textDisabled,
+    },
+    segmentedOptionActive: {
+      backgroundColor: colors.accentSecondary,
+    },
+    segmentedOptionText: { color: colors.textSecondary, fontSize: 13, fontWeight: '600' },
+    hoursExportOptionText: { color: colors.textPrimary, fontWeight: '600' },
+    segmentedOptionTextActive: { color: colors.onAccent, fontWeight: '700' },
+    optionButton: {
+      borderRadius: 10,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      backgroundColor: colors.surface,
     },
     optionButtonActive: {
       backgroundColor: colors.accentSecondary,
-      borderColor: colors.accentSecondary,
     },
-    optionButtonText: { color: colors.textSecondary, fontSize: 14 },
-    optionButtonTextActive: { color: '#FFFFFF', fontWeight: '700' },
+    optionButtonText: { color: colors.textPrimary, fontSize: 14, fontWeight: '600' },
+    optionButtonTextActive: { color: colors.onAccent, fontWeight: '700' },
 
     backupButton: {
       backgroundColor: colors.surfaceElevated,
       borderRadius: 10,
       padding: 14,
       alignItems: 'center',
-      borderWidth: 1,
-      borderColor: colors.border,
     },
     backupButtonsGroup: {
       gap: 10,
@@ -636,7 +694,7 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
 
     modalOverlay: {
       flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.75)',
+      backgroundColor: colors.scrimStrong,
       justifyContent: 'flex-end',
     },
     modalBox: {
@@ -646,6 +704,9 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
       padding: 24,
       gap: 12,
     },
+    hoursExportModalBox: {
+      paddingBottom: 200,
+    },
     modalTitle: { color: colors.textPrimary, fontSize: 20, fontWeight: '700', marginBottom: 4 },
     input: {
       backgroundColor: colors.surface,
@@ -653,8 +714,13 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
       padding: 14,
       color: colors.textPrimary,
       fontSize: 16,
-      borderWidth: 1,
-      borderColor: colors.border,
+    },
+    profileInput: {
+      backgroundColor: colors.bg,
+      borderRadius: 10,
+      padding: 14,
+      color: colors.textPrimary,
+      fontSize: 16,
     },
     colorLabel: { color: colors.textSecondary, fontSize: 13 },
     colorRow: {
@@ -674,8 +740,6 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
     },
     customColorButton: {
       marginTop: 8,
-      borderWidth: 1,
-      borderColor: colors.border,
       backgroundColor: colors.surface,
       borderRadius: 10,
       paddingHorizontal: 14,
@@ -689,8 +753,6 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
       width: 20,
       height: 20,
       borderRadius: 10,
-      borderWidth: 1,
-      borderColor: colors.border,
     },
     colorPickerBox: {
       backgroundColor: colors.surfaceElevated,
@@ -727,30 +789,28 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
       marginBottom: 4,
     },
     monthChip: {
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.border,
+      backgroundColor: colors.surfaceHighlight,
       borderRadius: 8,
       paddingVertical: 8,
       paddingHorizontal: 10,
     },
     monthChipActive: {
       backgroundColor: colors.accentSecondary,
-      borderColor: colors.accentSecondary,
     },
     monthChipText: {
       color: colors.textSecondary,
       fontSize: 13,
     },
     monthChipTextActive: {
-      color: '#FFFFFF',
+      color: colors.onAccent,
       fontWeight: '700',
     },
     modalButtons: { flexDirection: 'row', gap: 10 },
+    hoursExportButtons: { marginTop: 14 },
     modalBtn: { flex: 1, borderRadius: 10, padding: 14, alignItems: 'center' },
-    modalBtnCancel: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+    modalBtnCancel: { backgroundColor: colors.surface },
     modalBtnCancelText: { color: colors.textPrimary, fontWeight: '600' },
     modalBtnConfirm: { backgroundColor: colors.accentSecondary },
-    modalBtnConfirmText: { color: '#FFFFFF', fontWeight: '700' },
+    modalBtnConfirmText: { color: colors.onAccent, fontWeight: '700' },
   });
 }

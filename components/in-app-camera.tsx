@@ -1,6 +1,5 @@
 import React, { useRef, useState } from 'react';
 import {
-  Alert,
   Modal,
   StyleSheet,
   Text,
@@ -9,7 +8,8 @@ import {
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 
-import { Colors } from '@/constants/colors';
+import { useAppColors } from '@/hooks/use-app-colors';
+import { useDialog } from '@/components/ui/app-dialog';
 
 type InAppCameraProps = {
   visible: boolean;
@@ -18,9 +18,12 @@ type InAppCameraProps = {
 };
 
 export function InAppCamera({ visible, onClose, onCapture }: InAppCameraProps) {
+  const { colors } = useAppColors();
+  const styles = getStyles(colors);
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView | null>(null);
   const [isCapturing, setIsCapturing] = useState(false);
+  const { show: showDialog, dialogNode } = useDialog();
 
   const handleTakePhoto = async () => {
     if (!cameraRef.current || isCapturing) return;
@@ -29,13 +32,13 @@ export function InAppCamera({ visible, onClose, onCapture }: InAppCameraProps) {
       setIsCapturing(true);
       const photo = await cameraRef.current.takePictureAsync({ quality: 0.7 });
       if (!photo?.uri) {
-        Alert.alert('Fout', 'Foto maken is mislukt.');
+        showDialog({ title: 'Fout', message: 'Foto maken is mislukt.' });
         return;
       }
       await onCapture(photo.uri);
       onClose();
     } catch {
-      Alert.alert('Fout', 'Foto maken is mislukt.');
+      showDialog({ title: 'Fout', message: 'Foto maken is mislukt.' });
     } finally {
       setIsCapturing(false);
     }
@@ -47,10 +50,14 @@ export function InAppCamera({ visible, onClose, onCapture }: InAppCameraProps) {
       <Text style={styles.permissionText}>
         Sta camera-toegang toe om een bonfoto in de app te maken.
       </Text>
-      <TouchableOpacity style={styles.primaryButton} onPress={requestPermission}>
+      <TouchableOpacity style={styles.primaryButton} onPress={requestPermission}
+        accessibilityLabel="Camera-toegang geven"
+        accessibilityRole="button">
         <Text style={styles.primaryButtonText}>Toegang geven</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={styles.secondaryButton} onPress={onClose}>
+      <TouchableOpacity style={styles.secondaryButton} onPress={onClose}
+        accessibilityLabel="Camera sluiten"
+        accessibilityRole="button">
         <Text style={styles.secondaryButtonText}>Annuleren</Text>
       </TouchableOpacity>
     </View>
@@ -65,7 +72,9 @@ export function InAppCamera({ visible, onClose, onCapture }: InAppCameraProps) {
           <>
             <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" />
             <View style={styles.overlayTop}>
-              <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+              <TouchableOpacity style={styles.closeButton} onPress={onClose}
+                accessibilityLabel="Camera sluiten"
+                accessibilityRole="button">
                 <Text style={styles.closeButtonText}>Sluiten</Text>
               </TouchableOpacity>
             </View>
@@ -73,7 +82,9 @@ export function InAppCamera({ visible, onClose, onCapture }: InAppCameraProps) {
               <TouchableOpacity
                 style={[styles.captureButton, isCapturing && styles.captureButtonDisabled]}
                 onPress={handleTakePhoto}
-                disabled={isCapturing}>
+                disabled={isCapturing}
+                accessibilityLabel={isCapturing ? 'Foto wordt opgeslagen' : 'Foto maken'}
+                accessibilityRole="button">
                 <Text style={styles.captureButtonText}>
                   {isCapturing ? 'Opslaan...' : 'Foto maken'}
                 </Text>
@@ -81,33 +92,35 @@ export function InAppCamera({ visible, onClose, onCapture }: InAppCameraProps) {
             </View>
           </>
         )}
+        {dialogNode}
       </View>
     </Modal>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000000' },
+function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
+  return StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.bg },
   permissionContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
     gap: 12,
-    backgroundColor: Colors.bg,
+    backgroundColor: colors.bg,
   },
-  permissionTitle: { color: Colors.textPrimary, fontSize: 22, fontWeight: '700' },
-  permissionText: { color: Colors.textSecondary, fontSize: 15, textAlign: 'center' },
+  permissionTitle: { color: colors.textPrimary, fontSize: 22, fontWeight: '700' },
+  permissionText: { color: colors.textSecondary, fontSize: 15, textAlign: 'center' },
   primaryButton: {
     marginTop: 10,
-    backgroundColor: Colors.accentSecondary,
+    backgroundColor: colors.accentSecondary,
     borderRadius: 10,
     paddingVertical: 12,
     paddingHorizontal: 20,
   },
-  primaryButtonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
+  primaryButtonText: { color: colors.onAccent, fontWeight: '700', fontSize: 15 },
   secondaryButton: { padding: 10 },
-  secondaryButtonText: { color: Colors.textSecondary, fontSize: 14 },
+  secondaryButtonText: { color: colors.textSecondary, fontSize: 14 },
   overlayTop: {
     position: 'absolute',
     top: 0,
@@ -115,17 +128,15 @@ const styles = StyleSheet.create({
     right: 0,
     padding: 16,
     alignItems: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.35)',
+    backgroundColor: colors.scrimSoft,
   },
   closeButton: {
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.5)',
     borderRadius: 8,
     paddingVertical: 8,
     paddingHorizontal: 12,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+    backgroundColor: colors.scrim,
   },
-  closeButtonText: { color: '#FFFFFF', fontWeight: '600' },
+  closeButtonText: { color: colors.textPrimary, fontWeight: '600' },
   overlayBottom: {
     position: 'absolute',
     bottom: 0,
@@ -133,10 +144,10 @@ const styles = StyleSheet.create({
     right: 0,
     padding: 24,
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: colors.scrim,
   },
   captureButton: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.accentSecondary,
     borderRadius: 999,
     paddingVertical: 14,
     paddingHorizontal: 24,
@@ -144,5 +155,6 @@ const styles = StyleSheet.create({
   captureButtonDisabled: {
     opacity: 0.6,
   },
-  captureButtonText: { color: '#1D2B3A', fontWeight: '700', fontSize: 16 },
+  captureButtonText: { color: colors.onAccent, fontWeight: '700', fontSize: 16 },
 });
+}

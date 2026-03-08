@@ -5,7 +5,6 @@ import {
   TouchableOpacity,
   FlatList,
   StyleSheet,
-  Alert,
   Modal,
   TextInput,
 } from 'react-native';
@@ -15,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { formatEuro } from '@/constants/colors';
 import { useAppStore } from '@/store/use-app-store';
 import { useAppColors } from '@/hooks/use-app-colors';
+import { useDialog } from '@/components/ui/app-dialog';
 import { getAllUnpaidWorkEntries } from '@/db/work-entries';
 import { getAllUnpaidExpenses } from '@/db/expenses';
 import { getAllPayments, insertPayment, applyPayment, deletePaymentAndRecalculate, updatePayment } from '@/db/payments';
@@ -30,6 +30,7 @@ export default function BalanceScreen() {
   const { balance, refreshBalance } = useAppStore();
   const { colors } = useAppColors();
   const styles = getStyles(colors);
+  const { show: showDialog, dialogNode } = useDialog();
 
   const [activeTab, setActiveTab] = useState<'openstaand' | 'history'>('openstaand');
   const [unpaidItems, setUnpaidItems] = useState<UnpaidItem[]>([]);
@@ -51,7 +52,7 @@ export default function BalanceScreen() {
     setUnpaidItems(combined);
     setPayments(getAllPayments());
     refreshBalance();
-  }, []);
+  }, [refreshBalance]);
 
   useFocusEffect(
     useCallback(() => {
@@ -62,16 +63,20 @@ export default function BalanceScreen() {
   const handlePayment = () => {
     const amount = parseFloat(paymentAmount.replace(',', '.'));
     if (isNaN(amount) || amount <= 0) {
-      Alert.alert('Ongeldig bedrag', 'Voer een geldig positief bedrag in.');
+      showDialog({ title: 'Ongeldig bedrag', message: 'Voer een geldig positief bedrag in.' });
       return;
     }
-    const today = dateToDateString(new Date());
-    insertPayment(today, amount, '');
-    applyPayment(amount);
-    refreshBalance();
-    setPaymentAmount('');
-    setShowPayModal(false);
-    loadData();
+    try {
+      const today = dateToDateString(new Date());
+      insertPayment(today, amount, '');
+      applyPayment(amount);
+      refreshBalance();
+      setPaymentAmount('');
+      setShowPayModal(false);
+      loadData();
+    } catch {
+      showDialog({ title: 'Fout', message: 'Kon de betaling niet verwerken. Probeer het opnieuw.' });
+    }
   };
 
   const handlePaymentPress = (payment: Payment) => {
@@ -85,14 +90,18 @@ export default function BalanceScreen() {
     if (!editingPayment) return;
     const amount = parseFloat(editAmount.replace(',', '.'));
     if (isNaN(amount) || amount <= 0) {
-      Alert.alert('Ongeldig bedrag', 'Voer een geldig positief bedrag in.');
+      showDialog({ title: 'Ongeldig bedrag', message: 'Voer een geldig positief bedrag in.' });
       return;
     }
-    updatePayment(editingPayment.id, amount, editNote);
-    setEditingPayment(null);
-    setEditAmount('');
-    setEditNote('');
-    loadData();
+    try {
+      updatePayment(editingPayment.id, amount, editNote);
+      setEditingPayment(null);
+      setEditAmount('');
+      setEditNote('');
+      loadData();
+    } catch {
+      showDialog({ title: 'Fout', message: 'Kon de betaling niet bijwerken. Probeer het opnieuw.' });
+    }
   };
 
   const handleDeletePayment = () => {
@@ -108,7 +117,6 @@ export default function BalanceScreen() {
   const renderUnpaidItem = ({ item }: { item: UnpaidItem }) => {
     const remaining = item.amount - item.amount_paid;
     const isPartial = item.amount_paid > 0;
-    const statusColor = isPartial ? colors.statusPartial : colors.statusUnpaid;
 
     return (
       <TouchableOpacity
@@ -128,21 +136,26 @@ export default function BalanceScreen() {
           ]}
         />
         <View style={styles.listItemContent}>
+          <View style={styles.listItemTopRow}>
+            <Text style={styles.listItemTitle}>
+              {item.itemType === 'work'
+                ? `${(item as WorkEntry).company_name ?? 'Bedrijf'} · ${formatDuration((item as WorkEntry).duration_minutes)}`
+                : `${(item as Expense).company_name ?? 'Geen bedrijf'} · ${(item as Expense).description || 'Onkost'}`}
+            </Text>
+            <Text style={styles.listItemAmount}>
+              {formatEuro(remaining)}
+            </Text>
+          </View>
           <Text style={styles.listItemDate}>{item.date}</Text>
-          <Text style={styles.listItemTitle}>
-            {item.itemType === 'work'
-              ? `${(item as WorkEntry).company_name ?? 'Bedrijf'} · ${formatDuration((item as WorkEntry).duration_minutes)}`
-              : `${(item as Expense).company_name ?? 'Geen bedrijf'} · ${(item as Expense).description || 'Onkost'}`}
-          </Text>
+          {item.itemType === 'work' && (item as WorkEntry).note ? (
+            <Text style={styles.listItemNote}>{(item as WorkEntry).note}</Text>
+          ) : null}
           {isPartial && (
-            <Text style={[styles.listItemStatus, { color: colors.statusPartial }]}>
+            <Text style={styles.listItemStatus}>
               Deels betaald ({formatEuro(item.amount_paid)} / {formatEuro(item.amount)})
             </Text>
           )}
         </View>
-        <Text style={[styles.listItemAmount, { color: statusColor }]}>
-          {formatEuro(remaining)}
-        </Text>
       </View>
       </TouchableOpacity>
     );
@@ -153,14 +166,16 @@ export default function BalanceScreen() {
       <View style={styles.listItem}>
         <View style={[styles.listItemBar, { backgroundColor: colors.accent }]} />
         <View style={styles.listItemContent}>
+          <View style={styles.listItemTopRow}>
+            <Text style={styles.listItemTitle}>
+              {item.note || 'Contante betaling'}
+            </Text>
+            <Text style={styles.listItemAmount}>
+              {formatEuro(item.amount)}
+            </Text>
+          </View>
           <Text style={styles.listItemDate}>{item.date}</Text>
-          <Text style={styles.listItemTitle}>
-            {item.note || 'Contante betaling'}
-          </Text>
         </View>
-        <Text style={[styles.listItemAmount, { color: colors.accent }]}>
-          {formatEuro(item.amount)}
-        </Text>
       </View>
     </TouchableOpacity>
   );
@@ -172,10 +187,12 @@ export default function BalanceScreen() {
         <Text style={styles.balanceLabel}>
           {balance < 0 ? 'Te veel ontvangen' : 'Nog te ontvangen'}
         </Text>
-        <Text style={[styles.balanceAmount, balance < 0 && { color: colors.error }]}>
+        <Text style={styles.balanceAmount}>
           {formatEuro(balance)}
         </Text>
-        <TouchableOpacity style={styles.payButton} onPress={() => setShowPayModal(true)}>
+        <TouchableOpacity style={styles.payButton} onPress={() => setShowPayModal(true)}
+          accessibilityLabel="Betaling ontvangen"
+          accessibilityRole="button">
           <Text style={styles.payButtonText}>Betaling Ontvangen</Text>
         </TouchableOpacity>
       </View>
@@ -184,14 +201,20 @@ export default function BalanceScreen() {
       <View style={styles.tabRow}>
         <TouchableOpacity
           style={[styles.tab, activeTab === 'openstaand' && styles.tabActive]}
-          onPress={() => setActiveTab('openstaand')}>
+          onPress={() => setActiveTab('openstaand')}
+          accessibilityLabel={`Openstaand, ${unpaidItems.length} posten`}
+          accessibilityRole="tab"
+          accessibilityState={{ selected: activeTab === 'openstaand' }}>
           <Text style={[styles.tabText, activeTab === 'openstaand' && styles.tabTextActive]}>
             Openstaand ({unpaidItems.length})
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.tab, activeTab === 'history' && styles.tabActive]}
-          onPress={() => setActiveTab('history')}>
+          onPress={() => setActiveTab('history')}
+          accessibilityLabel={`Betalingen, ${payments.length} posten`}
+          accessibilityRole="tab"
+          accessibilityState={{ selected: activeTab === 'history' }}>
           <Text style={[styles.tabText, activeTab === 'history' && styles.tabTextActive]}>
             Betalingen ({payments.length})
           </Text>
@@ -317,6 +340,7 @@ export default function BalanceScreen() {
           </View>
         </View>
       </Modal>
+      {dialogNode}
     </SafeAreaView>
   );
 }
@@ -331,8 +355,6 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
     padding: 24,
     alignItems: 'center',
     gap: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
   },
   balanceLabel: { color: colors.textSecondary, fontSize: 14, textTransform: 'uppercase', letterSpacing: 1 },
   balanceAmount: { color: colors.textPrimary, fontSize: 42, fontWeight: '800', letterSpacing: -1 },
@@ -343,13 +365,11 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
     paddingHorizontal: 28,
     marginTop: 8,
   },
-  payButtonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 16 },
+  payButtonText: { color: colors.onAccent, fontWeight: '700', fontSize: 16 },
 
   // Tabs
   tabRow: {
     flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
   },
   tab: { flex: 1, padding: 14, alignItems: 'center' },
   tabActive: { borderBottomWidth: 2, borderBottomColor: colors.accentSecondary },
@@ -364,22 +384,27 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
     borderRadius: 10,
     overflow: 'hidden',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
   },
   listItemBar: { width: 4, alignSelf: 'stretch' },
   listItemContent: { flex: 1, padding: 12 },
+  listItemTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
   listItemDate: { color: colors.textSecondary, fontSize: 12 },
-  listItemTitle: { color: colors.textPrimary, fontWeight: '600', fontSize: 15 },
-  listItemStatus: { fontSize: 12, marginTop: 2 },
-  listItemAmount: { paddingRight: 12, fontWeight: '700', fontSize: 16 },
+  listItemNote: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
+  listItemTitle: { color: colors.textPrimary, fontWeight: '600', fontSize: 15, flex: 1 },
+  listItemStatus: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
+  listItemAmount: { color: colors.textPrimary, fontWeight: '700', fontSize: 16 },
 
   emptyText: { color: colors.textSecondary, textAlign: 'center', marginTop: 40, fontSize: 15 },
 
   // Modal
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.75)',
+    backgroundColor: colors.scrimStrong,
     justifyContent: 'center',
     padding: 24,
   },
@@ -388,8 +413,6 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
     borderRadius: 14,
     padding: 24,
     gap: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
   },
   modalTitle: { color: colors.textPrimary, fontSize: 20, fontWeight: '700' },
   modalInput: {
@@ -399,17 +422,15 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
     fontSize: 22,
     color: colors.textPrimary,
     fontWeight: '700',
-    borderWidth: 1,
-    borderColor: colors.border,
   },
   modalHint: { color: colors.textSecondary, fontSize: 13 },
   modalButtons: { flexDirection: 'row', gap: 10 },
   modalBtn: { flex: 1, borderRadius: 10, padding: 14, alignItems: 'center' },
-  modalBtnCancel: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  modalBtnCancel: { backgroundColor: colors.surface },
   modalBtnCancelText: { color: colors.textPrimary, fontWeight: '600' },
   modalBtnConfirm: { backgroundColor: colors.accentSecondary },
   deleteBtn: { backgroundColor: colors.error },
-  modalBtnConfirmText: { color: '#FFFFFF', fontWeight: '700' },
+  modalBtnConfirmText: { color: colors.onAccent, fontWeight: '700' },
   deleteConfirmBox: {
     borderWidth: 1,
     borderColor: colors.error,

@@ -6,7 +6,7 @@ export function getWorkEntriesByDate(date: string): WorkEntry[] {
     `SELECT we.*, c.name as company_name, c.color as company_color
      FROM work_entries we
      LEFT JOIN companies c ON we.company_id = c.id
-     WHERE we.date = ?
+     WHERE we.date = ? AND we.deleted_at IS NULL
      ORDER BY we.start_time ASC`,
     [date]
   );
@@ -19,7 +19,7 @@ export function getWorkEntriesByMonth(year: number, month: number): WorkEntry[] 
     `SELECT we.*, c.name as company_name, c.color as company_color
      FROM work_entries we
      LEFT JOIN companies c ON we.company_id = c.id
-     WHERE we.date LIKE ?
+     WHERE we.date LIKE ? AND we.deleted_at IS NULL
      ORDER BY we.date ASC, we.start_time ASC`,
     [`${prefix}%`]
   );
@@ -31,7 +31,7 @@ export function getAllUnpaidWorkEntries(): WorkEntry[] {
     `SELECT we.*, c.name as company_name, c.color as company_color
      FROM work_entries we
      LEFT JOIN companies c ON we.company_id = c.id
-     WHERE we.amount_paid < we.amount
+     WHERE we.amount_paid < we.amount AND we.deleted_at IS NULL
      ORDER BY we.date ASC, we.start_time ASC`
   );
 }
@@ -42,6 +42,7 @@ export function getRecentWorkEntries(limit: number): WorkEntry[] {
     `SELECT we.*, c.name as company_name, c.color as company_color
      FROM work_entries we
      LEFT JOIN companies c ON we.company_id = c.id
+     WHERE we.deleted_at IS NULL
      ORDER BY we.date DESC, we.start_time DESC
      LIMIT ?`,
     [limit]
@@ -94,7 +95,12 @@ export function updateWorkEntryPayment(id: number, amountPaid: number, isLocked:
 
 export function deleteWorkEntry(id: number): void {
   const db = getDb();
-  db.runSync('DELETE FROM work_entries WHERE id = ?', [id]);
+  db.runSync("UPDATE work_entries SET deleted_at = datetime('now') WHERE id = ?", [id]);
+}
+
+export function restoreWorkEntry(id: number): void {
+  const db = getDb();
+  db.runSync('UPDATE work_entries SET deleted_at = NULL WHERE id = ?', [id]);
 }
 
 export function getMonthSummaries(): { year: number; month: number; total_hours: number; total_amount: number }[] {
@@ -106,6 +112,7 @@ export function getMonthSummaries(): { year: number; month: number; total_hours:
        ROUND(SUM(duration_minutes) / 60.0, 2) as total_hours,
        ROUND(SUM(amount), 2) as total_amount
      FROM work_entries
+     WHERE deleted_at IS NULL
      GROUP BY year, month
      ORDER BY year DESC, month DESC`
   );

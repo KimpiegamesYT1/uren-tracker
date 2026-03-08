@@ -1,4 +1,5 @@
 import * as SQLite from 'expo-sqlite';
+import { SETTINGS_KEYS } from '../constants/settings-keys';
 
 export type Company = {
   id: number;
@@ -107,15 +108,32 @@ function ensureInitialized(db: SQLite.SQLiteDatabase): void {
       value TEXT NOT NULL DEFAULT ''
     );
 
-    INSERT OR IGNORE INTO settings (key, value) VALUES ('rounding_unit', '1');
-    INSERT OR IGNORE INTO settings (key, value) VALUES ('rounding_direction', 'round');
-    INSERT OR IGNORE INTO settings (key, value) VALUES ('theme', 'dark');
-    INSERT OR IGNORE INTO settings (key, value) VALUES ('user_name', '');
+    CREATE INDEX IF NOT EXISTS idx_work_entries_date ON work_entries(date);
+    CREATE INDEX IF NOT EXISTS idx_work_entries_unpaid ON work_entries(amount_paid, amount);
+    CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date);
+    CREATE INDEX IF NOT EXISTS idx_expenses_unpaid ON expenses(amount_paid, amount);
+
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('${SETTINGS_KEYS.roundingUnit}', '1');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('${SETTINGS_KEYS.roundingDirection}', 'round');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('${SETTINGS_KEYS.theme}', 'dark');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('${SETTINGS_KEYS.userName}', '');
   `);
 
   // Migration for existing installs that were created before expenses had company_id.
   try {
     db.runSync('ALTER TABLE expenses ADD COLUMN company_id INTEGER');
+  } catch {
+    // Column already exists; ignore.
+  }
+
+  // Migration: soft-delete support
+  try {
+    db.runSync('ALTER TABLE work_entries ADD COLUMN deleted_at TEXT DEFAULT NULL');
+  } catch {
+    // Column already exists; ignore.
+  }
+  try {
+    db.runSync('ALTER TABLE expenses ADD COLUMN deleted_at TEXT DEFAULT NULL');
   } catch {
     // Column already exists; ignore.
   }

@@ -113,7 +113,7 @@ export default function MonthDetailScreen() {
             <Text style={styles.summaryStatLabel}>Gewerkt</Text>
           </View>
           <View style={styles.summaryStat}>
-            <Text style={[styles.summaryStatValue, { color: colors.accent }]}> 
+            <Text style={styles.summaryStatValue}>
               {formatEuro(totalAmount)}
             </Text>
             <Text style={styles.summaryStatLabel}>Verdiensten</Text>
@@ -141,8 +141,6 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
     backgroundColor: colors.surface,
     padding: 20,
     gap: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
   },
   summaryTitle: { color: colors.textPrimary, fontSize: 22, fontWeight: '700' },
   summaryRow: { flexDirection: 'row', gap: 24 },
@@ -157,8 +155,6 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
     borderRadius: 10,
     overflow: 'hidden',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
   },
   itemBar: { width: 4, alignSelf: 'stretch' },
   itemContent: { flex: 1, padding: 12 },
@@ -167,7 +163,7 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
   itemSub: { color: colors.textSecondary, fontSize: 12 },
   itemNote: { color: colors.textSecondary, fontSize: 12, fontStyle: 'italic' },
   itemRight: { padding: 12, alignItems: 'flex-end', gap: 2 },
-  itemAmount: { color: colors.accent, fontWeight: '700', fontSize: 15 },
+  itemAmount: { color: colors.textPrimary, fontWeight: '700', fontSize: 15 },
   lockIcon: { fontSize: 12 },
   emptyText: { color: colors.textSecondary, textAlign: 'center', marginTop: 40, fontSize: 15 },
   });

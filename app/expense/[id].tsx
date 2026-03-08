@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   ScrollView,
   StyleSheet,
-  Alert,
   Image,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -15,15 +14,16 @@ import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/dat
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 
-import { Colors, formatEuro, getCompanyDisplayColor } from '@/constants/colors';
+import { getCompanyDisplayColor } from '@/constants/colors';
 import { useAppStore } from '@/store/use-app-store';
-import { insertExpense, updateExpense, deleteExpense } from '@/db/expenses';
+import { insertExpense, updateExpense, deleteExpense, restoreExpense } from '@/db/expenses';
 import { getAllCompanies } from '@/db/companies';
-import { getDb, Expense } from '@/db/schema';
-import { Company } from '@/db/schema';
+import { getDb, Expense, Company } from '@/db/schema';
 import { dateToDateString, dateStringToDate } from '@/utils/rounding';
 import { InAppCamera } from '@/components/in-app-camera';
+import { UndoToast } from '@/components/undo-toast';
 import { useAppColors } from '@/hooks/use-app-colors';
+import { useDialog } from '@/components/ui/app-dialog';
 
 const RECEIPTS_DIR = `${FileSystem.documentDirectory}receipts/`;
 
@@ -38,7 +38,9 @@ export default function ExpenseScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { refreshBalance } = useAppStore();
-  const { uiTheme } = useAppColors();
+  const { colors, uiTheme } = useAppColors();
+  const styles = getStyles(colors);
+  const { show: showDialog, dialogNode } = useDialog();
 
   const isNew = !id || id === 'new';
 
@@ -54,6 +56,7 @@ export default function ExpenseScreen() {
   const [amount, setAmount] = useState('');
   const [receiptUri, setReceiptUri] = useState<string | null>(null);
   const [showCamera, setShowCamera] = useState(false);
+  const [showUndoToast, setShowUndoToast] = useState(false);
 
   useEffect(() => {
     const loaded = getAllCompanies();
@@ -75,78 +78,93 @@ export default function ExpenseScreen() {
         setReceiptUri(expense.receipt_photo_uri);
       }
     }
-  }, [id]);
+  }, [id, isNew]);
 
   const handleSave = () => {
     if (isLocked && !lockWarningShown) {
-      Alert.alert(
-        'Onkost al uitbetaald',
-        'Deze onkostenpost is al uitbetaald. Weet je zeker dat je dit wilt wijzigen? Dit beïnvloedt je openstaande saldo.',
-        [
+      showDialog({
+        title: 'Onkost al uitbetaald',
+        message:
+          'Deze onkostenpost is al uitbetaald. Weet je zeker dat je dit wilt wijzigen? Dit beïnvloedt je openstaande saldo.',
+        buttons: [
           { text: 'Annuleren', style: 'cancel' },
           {
             text: 'Toch bewerken',
             style: 'destructive',
             onPress: () => {
               setLockWarningShown(true);
-              doSave();
+              void doSave();
             },
           },
-        ]
-      );
+        ],
+      });
       return;
     }
-    doSave();
+    void doSave();
   };
 
-  const doSave = () => {
+  const doSave = async () => {
     const parsedAmount = parseFloat(amount.replace(',', '.'));
     if (!description.trim()) {
-      Alert.alert('Beschrijving vereist', 'Voer een beschrijving in.');
+      showDialog({ title: 'Beschrijving vereist', message: 'Voer een beschrijving in.' });
       return;
     }
     if (!selectedCompanyId) {
-      Alert.alert('Bedrijf vereist', 'Kies eerst een bedrijf voor deze onkost.');
+      showDialog({ title: 'Bedrijf vereist', message: 'Kies eerst een bedrijf voor deze onkost.' });
       return;
     }
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
-      Alert.alert('Ongeldig bedrag', 'Voer een geldig bedrag in.');
+      showDialog({ title: 'Ongeldig bedrag', message: 'Voer een geldig bedrag in.' });
       return;
     }
     const dateStr = dateToDateString(selectedDate);
 
-    if (isNew) {
-      insertExpense(dateStr, selectedCompanyId, description.trim(), parsedAmount, receiptUri);
-    } else if (existingExpense) {
-      updateExpense(existingExpense.id, dateStr, selectedCompanyId, description.trim(), parsedAmount, receiptUri);
-      // If was locked and now edited, reset lock so saldo recalculates on next payment
-      if (isLocked) {
-        const db = getDb();
-        db.runSync('UPDATE expenses SET is_locked = 0 WHERE id = ?', [existingExpense.id]);
+    try {
+      if (isNew) {
+        insertExpense(dateStr, selectedCompanyId, description.trim(), parsedAmount, receiptUri);
+      } else if (existingExpense) {
+        const oldPhoto = existingExpense.receipt_photo_uri;
+        if (oldPhoto && oldPhoto !== receiptUri) {
+          try {
+            await FileSystem.deleteAsync(oldPhoto, { idempotent: true });
+          } catch {}
+        }
+        updateExpense(existingExpense.id, dateStr, selectedCompanyId, description.trim(), parsedAmount, receiptUri);
+        // If was locked and now edited, reset lock so saldo recalculates on next payment
+        if (isLocked) {
+          const db = getDb();
+          db.runSync('UPDATE expenses SET is_locked = 0 WHERE id = ?', [existingExpense.id]);
+        }
       }
+      refreshBalance();
+      router.back();
+    } catch {
+      showDialog({ title: 'Fout', message: 'Kon de onkost niet opslaan. Probeer het opnieuw.' });
     }
-    refreshBalance();
-    router.back();
   };
 
   const handleDelete = () => {
     if (!existingExpense) return;
-    Alert.alert(
-      'Onkost verwijderen',
-      'Weet je zeker dat je deze onkostenpost wilt verwijderen?',
-      [
-        { text: 'Annuleren', style: 'cancel' },
-        {
-          text: 'Verwijderen',
-          style: 'destructive',
-          onPress: () => {
-            deleteExpense(existingExpense.id);
-            refreshBalance();
-            router.back();
-          },
-        },
-      ]
-    );
+    deleteExpense(existingExpense.id);
+    refreshBalance();
+    setShowUndoToast(true);
+  };
+
+  const handleUndoDelete = () => {
+    if (!existingExpense) return;
+    restoreExpense(existingExpense.id);
+    refreshBalance();
+    setShowUndoToast(false);
+  };
+
+  const handleToastDismiss = async () => {
+    setShowUndoToast(false);
+    if (existingExpense?.receipt_photo_uri) {
+      try {
+        await FileSystem.deleteAsync(existingExpense.receipt_photo_uri, { idempotent: true });
+      } catch {}
+    }
+    router.back();
   };
 
   const handleCameraCapture = async (sourceUri: string) => {
@@ -161,7 +179,7 @@ export default function ExpenseScreen() {
     if (!receiptUri) return;
     const canShare = await Sharing.isAvailableAsync();
     if (!canShare) {
-      Alert.alert('Niet beschikbaar', 'Delen is niet beschikbaar op dit apparaat.');
+      showDialog({ title: 'Niet beschikbaar', message: 'Delen is niet beschikbaar op dit apparaat.' });
       return;
     }
     await Sharing.shareAsync(receiptUri, {
@@ -178,96 +196,107 @@ export default function ExpenseScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <View style={styles.headerSection}>
+          <Text style={styles.headerTitle}>{isNew ? 'Onkost Toevoegen' : 'Onkost Bewerken'}</Text>
+          <TouchableOpacity style={styles.dateSelector} onPress={() => setShowDatePicker(true)}>
+            <Text style={styles.dateSelectorText}>
+              {selectedDate.toLocaleDateString('nl-NL', {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric',
+              })}
+            </Text>
+            <Text style={styles.dateSelectorIcon}>▾</Text>
+          </TouchableOpacity>
+        </View>
+
         {isLocked && (
           <View style={styles.lockBanner}>
             <Text style={styles.lockBannerText}>🔒 Deze onkost is al uitbetaald</Text>
           </View>
         )}
-
-        <TouchableOpacity style={styles.dateButton} onPress={() => setShowDatePicker(true)}>
-          <Text style={styles.dateButtonText}>
-            {selectedDate.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-          </Text>
-        </TouchableOpacity>
         {showDatePicker && (
           <DateTimePicker value={selectedDate} mode="date" display="default" onChange={onDateChange} />
         )}
 
-        <TextInput
-          style={styles.input}
-          placeholder="Beschrijving"
-          placeholderTextColor={Colors.textDisabled}
-          value={description}
-          onChangeText={setDescription}
-        />
+        <View style={styles.mainCard}>
+          <TextInput
+            style={styles.modernInput}
+            placeholder="Beschrijving"
+            placeholderTextColor={colors.textDisabled}
+            value={description}
+            onChangeText={setDescription}
+          />
 
-        <Text style={styles.sectionLabel}>Bedrijf</Text>
-        <View style={styles.companyRow}>
-          {companies.map((company) => (
-            <TouchableOpacity
-              key={company.id}
-              style={[
-                styles.companyChip,
-                { borderColor: getCompanyDisplayColor(company.color, uiTheme) },
-                selectedCompanyId === company.id && {
-                  backgroundColor: getCompanyDisplayColor(company.color, uiTheme),
-                },
-              ]}
-              onPress={() => setSelectedCompanyId(company.id)}>
-              <Text
+          <Text style={styles.sectionLabel}>BEDRIJF</Text>
+          <View style={styles.companyRow}>
+            {companies.map((company) => (
+              <TouchableOpacity
+                key={company.id}
                 style={[
-                  styles.companyChipText,
+                  styles.companyChip,
                   selectedCompanyId === company.id && {
-                    color: uiTheme === 'dark' ? '#0E141B' : '#FFFFFF',
-                    fontWeight: '700',
+                    backgroundColor: getCompanyDisplayColor(company.color, uiTheme),
                   },
-                ]}>
-                {company.name}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        {companies.length === 0 ? (
-          <Text style={styles.helperText}>Voeg eerst een bedrijf toe in Instellingen.</Text>
-        ) : null}
-
-        <TextInput
-          style={styles.input}
-          placeholder="Bedrag (bijv. 25,50)"
-          placeholderTextColor={Colors.textDisabled}
-          keyboardType="decimal-pad"
-          value={amount}
-          onChangeText={setAmount}
-        />
-
-        {/* Receipt photo */}
-        {receiptUri ? (
-          <View style={styles.receiptContainer}>
-            <Image source={{ uri: receiptUri }} style={styles.receiptImage} resizeMode="cover" />
-            <View style={styles.receiptActions}>
-              <TouchableOpacity style={styles.sharePhotoButton} onPress={handleSharePhoto}>
-                <Text style={styles.sharePhotoText}>Deel foto</Text>
+                ]}
+                onPress={() => setSelectedCompanyId(company.id)}>
+                <Text
+                  style={[
+                    styles.companyChipText,
+                    selectedCompanyId === company.id && {
+                      color: uiTheme === 'dark' ? colors.bg : colors.surface,
+                      fontWeight: '700',
+                    },
+                  ]}>
+                  {company.name}
+                </Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.removePhotoButton} onPress={() => setReceiptUri(null)}>
-                <Text style={styles.removePhotoText}>Foto verwijderen</Text>
-              </TouchableOpacity>
-            </View>
+            ))}
           </View>
-        ) : (
-          <TouchableOpacity style={styles.photoButton} onPress={() => setShowCamera(true)}>
-            <Text style={styles.photoButtonText}>Bonnetje fotograferen</Text>
-          </TouchableOpacity>
-        )}
+          {companies.length === 0 ? (
+            <Text style={styles.helperText}>Voeg eerst een bedrijf toe in Instellingen.</Text>
+          ) : null}
 
-        <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-          <Text style={styles.saveButtonText}>Opslaan</Text>
-        </TouchableOpacity>
+          <TextInput
+            style={styles.modernInput}
+            placeholder="Bedrag (bijv. 25,50)"
+            placeholderTextColor={colors.textDisabled}
+            keyboardType="decimal-pad"
+            value={amount}
+            onChangeText={setAmount}
+          />
 
-        {!isNew && (
-          <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
-            <Text style={styles.deleteButtonText}>Onkost verwijderen</Text>
+          {receiptUri ? (
+            <View style={styles.receiptContainer}>
+              <Image source={{ uri: receiptUri }} style={styles.receiptImage} resizeMode="cover" />
+              <View style={styles.receiptActions}>
+                <TouchableOpacity style={styles.sharePhotoButton} onPress={handleSharePhoto}>
+                  <Text style={styles.sharePhotoText}>Deel foto</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.removePhotoButton} onPress={() => setReceiptUri(null)}>
+                  <Text style={styles.removePhotoText}>Foto verwijderen</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <TouchableOpacity style={styles.photoButton} onPress={() => setShowCamera(true)}>
+              <Text style={styles.photoButtonText}>Bonnetje fotograferen</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        <View style={styles.actionSection}>
+          <TouchableOpacity style={styles.primaryButton} onPress={handleSave}>
+            <Text style={styles.primaryButtonText}>Opslaan</Text>
           </TouchableOpacity>
-        )}
+
+          {!isNew && (
+            <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
+              <Text style={styles.deleteButtonText}>Onkost verwijderen</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </ScrollView>
 
       <InAppCamera
@@ -275,84 +304,106 @@ export default function ExpenseScreen() {
         onClose={() => setShowCamera(false)}
         onCapture={handleCameraCapture}
       />
+      <UndoToast
+        visible={showUndoToast}
+        message="Onkost verwijderd"
+        onUndo={handleUndoDelete}
+        onDismiss={handleToastDismiss}
+      />
+      {dialogNode}
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.bg },
-  content: { padding: 16, gap: 12, paddingBottom: 40 },
+function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
+  return StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.bg },
+  content: { padding: 20, gap: 12, paddingBottom: 40 },
+
+  headerSection: { marginBottom: 8 },
+  headerTitle: { fontSize: 28, fontWeight: '800', color: colors.textPrimary, letterSpacing: -0.5 },
+  dateSelector: { flexDirection: 'row', alignItems: 'center', marginTop: 4, alignSelf: 'flex-start', gap: 6 },
+  dateSelectorText: {
+    color: colors.accentSecondary,
+    fontWeight: '600',
+    fontSize: 17,
+    textTransform: 'capitalize',
+  },
+  dateSelectorIcon: { color: colors.accentSecondary, fontSize: 14 },
 
   lockBanner: {
-    backgroundColor: Colors.surfaceElevated,
-    borderRadius: 8,
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: 10,
     padding: 12,
     borderLeftWidth: 3,
-    borderLeftColor: Colors.warning,
+    borderLeftColor: colors.warning,
   },
-  lockBannerText: { color: Colors.warning, fontWeight: '600' },
+  lockBannerText: { color: colors.warning, fontWeight: '600' },
 
-  dateButton: {
-    backgroundColor: Colors.surface,
-    borderRadius: 10,
-    padding: 14,
-  },
-  dateButtonText: { color: Colors.textPrimary, fontSize: 15 },
-
-  input: {
-    backgroundColor: Colors.surface,
-    borderRadius: 10,
-    padding: 14,
-    color: Colors.textPrimary,
-    fontSize: 16,
+  mainCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 24,
+    padding: 20,
+    gap: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 5,
   },
 
-  sectionLabel: { color: Colors.textSecondary, fontSize: 13, marginTop: 2 },
+  modernInput: {
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: 12,
+    padding: 16,
+    color: colors.textPrimary,
+    fontSize: 15,
+  },
+
+  sectionLabel: { color: colors.textDisabled, fontSize: 11, fontWeight: '700', letterSpacing: 1, marginTop: 2 },
   companyRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   companyChip: {
-    borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.surface,
-    borderRadius: 8,
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: 20,
     paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
   },
-  companyChipText: { color: Colors.textSecondary, fontSize: 13 },
-  helperText: { color: Colors.textSecondary, fontSize: 12 },
+  companyChipText: { color: colors.textSecondary, fontSize: 14, fontWeight: '600' },
+  helperText: { color: colors.textSecondary, fontSize: 12 },
 
   photoButton: {
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 10,
-    borderStyle: 'dashed',
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: 12,
     padding: 20,
     alignItems: 'center',
   },
-  photoButtonText: { color: Colors.textSecondary, fontSize: 15 },
+  photoButtonText: { color: colors.textSecondary, fontSize: 15 },
 
   receiptContainer: { gap: 8 },
   receiptImage: { width: '100%', height: 200, borderRadius: 10 },
   receiptActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   sharePhotoButton: { padding: 8 },
-  sharePhotoText: { color: Colors.accentSecondary, fontSize: 14, fontWeight: '600' },
+  sharePhotoText: { color: colors.textSecondary, fontSize: 14, fontWeight: '600' },
   removePhotoButton: { alignItems: 'center', padding: 8 },
-  removePhotoText: { color: Colors.error, fontSize: 14 },
+  removePhotoText: { color: colors.error, fontSize: 14 },
 
-  saveButton: {
-    backgroundColor: Colors.accentSecondary,
-    borderRadius: 10,
-    padding: 16,
+  actionSection: { gap: 12, marginBottom: 4 },
+  primaryButton: {
+    backgroundColor: colors.accentSecondary,
+    borderRadius: 16,
+    padding: 18,
     alignItems: 'center',
     marginTop: 8,
   },
-  saveButtonText: { color: '#FFF', fontWeight: '700', fontSize: 16 },
+  primaryButtonText: { color: colors.onAccent, fontWeight: '700', fontSize: 16 },
 
   deleteButton: {
     borderWidth: 1,
-    borderColor: Colors.error,
+    borderColor: colors.error,
     borderRadius: 10,
     padding: 14,
     alignItems: 'center',
   },
-  deleteButtonText: { color: Colors.error, fontWeight: '600', fontSize: 15 },
+  deleteButtonText: { color: colors.error, fontWeight: '600', fontSize: 15 },
 });
+}

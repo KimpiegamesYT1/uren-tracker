@@ -1,6 +1,6 @@
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAppStore } from '@/store/use-app-store';
-import { DarkColors, LightColors, UiTheme } from '@/constants/colors';
+import { ThemeColors, UiTheme } from '@/constants/colors';
 
 export function useAppColors() {
   const appTheme = useAppStore((s) => s.settings.theme);
@@ -10,7 +10,7 @@ export function useAppColors() {
     appTheme === 'system' ? (systemScheme === 'dark' ? 'dark' : 'light') : appTheme;
 
   return {
-    colors: uiTheme === 'dark' ? DarkColors : LightColors,
+    colors: ThemeColors[uiTheme],
     uiTheme,
   };
 }

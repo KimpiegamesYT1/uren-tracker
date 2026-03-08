@@ -6,16 +6,18 @@ import {
   TouchableOpacity,
   ScrollView,
   StyleSheet,
-  Alert,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 
-import { Colors, formatEuro } from '@/constants/colors';
+import { formatEuro } from '@/constants/colors';
 import { useAppStore } from '@/store/use-app-store';
-import { updateWorkEntry, deleteWorkEntry } from '@/db/work-entries';
+import { updateWorkEntry, deleteWorkEntry, restoreWorkEntry } from '@/db/work-entries';
 import { getDb, WorkEntry } from '@/db/schema';
+import { useAppColors } from '@/hooks/use-app-colors';
+import { UndoToast } from '@/components/undo-toast';
+import { useDialog } from '@/components/ui/app-dialog';
 import {
   roundMinutes,
   calcRawDuration,
@@ -29,6 +31,9 @@ export default function EntryScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { companies, settings, refreshBalance } = useAppStore();
+  const { colors } = useAppColors();
+  const styles = getStyles(colors);
+  const { show: showDialog, dialogNode } = useDialog();
 
   const [entry, setEntry] = useState<WorkEntry | null>(null);
   const [isLocked, setIsLocked] = useState(false);
@@ -42,6 +47,7 @@ export default function EntryScreen() {
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
   const [note, setNote] = useState('');
+  const [showUndoToast, setShowUndoToast] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -53,25 +59,59 @@ export default function EntryScreen() {
       setSelectedDate(dateStringToDate(e.date));
       setSelectedCompanyId(e.company_id);
       setNote(e.note);
-
       const [sh, sm] = e.start_time.split(':').map(Number);
-      const startD = new Date();
-      startD.setHours(sh, sm, 0, 0);
-      setStartTime(startD);
-
       const [eh, em] = e.end_time.split(':').map(Number);
-      const endD = new Date();
-      endD.setHours(eh, em, 0, 0);
-      setEndTime(endD);
+      const s = new Date();
+      s.setHours(sh, sm, 0, 0);
+      const en = new Date();
+      en.setHours(eh, em, 0, 0);
+      setStartTime(s);
+      setEndTime(en);
     }
   }, [id]);
 
+  const startStr = dateToTimeString(startTime);
+  const endStr = dateToTimeString(endTime);
+  const rawMinutes = calcRawDuration(startStr, endStr);
+  const rounded =
+    rawMinutes > 0
+      ? roundMinutes(rawMinutes, settings.roundingUnit, settings.roundingDirection)
+      : 0;
+  const previewAmount =
+    rounded > 0
+      ? (rounded / 60) * (companies.find((c) => c.id === selectedCompanyId)?.hourly_rate ?? 0)
+      : 0;
+
+  const doSave = () => {
+    if (rawMinutes <= 0) {
+      showDialog({ title: 'Ongeldige tijd', message: 'Eindtijd moet na starttijd liggen.' });
+      return;
+    }
+    if (!entry || !selectedCompanyId) return;
+    const company = companies.find((c) => c.id === selectedCompanyId);
+    if (!company) return;
+    const dateStr = dateToDateString(selectedDate);
+    const amount = (rounded / 60) * company.hourly_rate;
+    try {
+      updateWorkEntry(entry.id, dateStr, selectedCompanyId, startStr, endStr, note, rounded, amount);
+      if (isLocked) {
+        const db = getDb();
+        db.runSync('UPDATE work_entries SET is_locked = 0 WHERE id = ?', [entry.id]);
+      }
+      refreshBalance();
+      router.back();
+    } catch {
+      showDialog({ title: 'Fout', message: 'Kon de dienst niet opslaan. Probeer het opnieuw.' });
+    }
+  };
+
   const handleSave = () => {
     if (isLocked && !lockWarningShown) {
-      Alert.alert(
-        'Dienst al uitbetaald',
-        'Deze registratie is al uitbetaald. Weet je zeker dat je dit wilt wijzigen? Dit beïnvloedt je openstaande saldo.',
-        [
+      showDialog({
+        title: 'Dienst al uitbetaald',
+        message:
+          'Deze registratie is al uitbetaald. Weet je zeker dat je dit wilt wijzigen? Dit beinvloedt je openstaande saldo.',
+        buttons: [
           { text: 'Annuleren', style: 'cancel' },
           {
             text: 'Toch bewerken',
@@ -81,61 +121,30 @@ export default function EntryScreen() {
               doSave();
             },
           },
-        ]
-      );
+        ],
+      });
       return;
     }
     doSave();
   };
 
-  const doSave = () => {
-    if (!entry || !selectedCompanyId) return;
-    const company = companies.find((c) => c.id === selectedCompanyId);
-    if (!company) return;
-
-    const startStr = dateToTimeString(startTime);
-    const endStr = dateToTimeString(endTime);
-    const rawMinutes = calcRawDuration(startStr, endStr);
-
-    if (rawMinutes <= 0) {
-      Alert.alert('Ongeldige tijd', 'Eindtijd moet na starttijd liggen.');
-      return;
-    }
-
-    const rounded = roundMinutes(rawMinutes, settings.roundingUnit, settings.roundingDirection);
-    const amount = (rounded / 60) * company.hourly_rate;
-    const dateStr = dateToDateString(selectedDate);
-
-    updateWorkEntry(entry.id, dateStr, selectedCompanyId, startStr, endStr, note, rounded, amount);
-
-    // Reset lock so FIFO can re-evaluate if needed
-    if (isLocked) {
-      const db = getDb();
-      db.runSync('UPDATE work_entries SET is_locked = 0 WHERE id = ?', [entry.id]);
-    }
-
-    refreshBalance();
-    router.back();
-  };
-
   const handleDelete = () => {
     if (!entry) return;
-    Alert.alert(
-      'Dienst verwijderen',
-      'Weet je zeker dat je deze dienst wilt verwijderen?',
-      [
-        { text: 'Annuleren', style: 'cancel' },
-        {
-          text: 'Verwijderen',
-          style: 'destructive',
-          onPress: () => {
-            deleteWorkEntry(entry.id);
-            refreshBalance();
-            router.back();
-          },
-        },
-      ]
-    );
+    deleteWorkEntry(entry.id);
+    refreshBalance();
+    setShowUndoToast(true);
+  };
+
+  const handleUndoDelete = () => {
+    if (!entry) return;
+    restoreWorkEntry(entry.id);
+    refreshBalance();
+    setShowUndoToast(false);
+  };
+
+  const handleToastDismiss = () => {
+    setShowUndoToast(false);
+    router.back();
   };
 
   const onDateChange = (_: DateTimePickerEvent, date?: Date) => {
@@ -153,13 +162,6 @@ export default function EntryScreen() {
     if (date) setEndTime(date);
   };
 
-  const startStr = dateToTimeString(startTime);
-  const endStr = dateToTimeString(endTime);
-  const rawMinutes = calcRawDuration(startStr, endStr);
-  const rounded = rawMinutes > 0 ? roundMinutes(rawMinutes, settings.roundingUnit, settings.roundingDirection) : 0;
-  const company = companies.find((c) => c.id === selectedCompanyId);
-  const previewAmount = company ? (rounded / 60) * company.hourly_rate : 0;
-
   if (!entry) {
     return (
       <SafeAreaView style={styles.container}>
@@ -171,166 +173,240 @@ export default function EntryScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <View style={styles.headerSection}>
+          <Text style={styles.headerTitle}>Dienst Bewerken</Text>
+          <TouchableOpacity style={styles.dateSelector} onPress={() => setShowDatePicker(true)}>
+            <Text style={styles.dateSelectorText}>
+              {selectedDate.toLocaleDateString('nl-NL', {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric',
+              })}
+            </Text>
+            <Text style={styles.dateSelectorIcon}>&#9662;</Text>
+          </TouchableOpacity>
+        </View>
+
+        {showDatePicker && (
+          <DateTimePicker
+            value={selectedDate}
+            mode="date"
+            display="default"
+            onChange={onDateChange}
+          />
+        )}
+
         {isLocked && (
           <View style={styles.lockBanner}>
-            <Text style={styles.lockBannerText}>🔒 Deze dienst is al uitbetaald</Text>
+            <Text style={styles.lockBannerText}>Deze dienst is al uitbetaald</Text>
           </View>
         )}
 
-        {/* Date */}
-        <TouchableOpacity style={styles.dateButton} onPress={() => setShowDatePicker(true)}>
-          <Text style={styles.dateButtonText}>
-            {selectedDate.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-          </Text>
-        </TouchableOpacity>
-        {showDatePicker && (
-          <DateTimePicker value={selectedDate} mode="date" display="default" onChange={onDateChange} />
-        )}
+        <View style={styles.companySection}>
+          <Text style={styles.sectionLabel}>BEDRIJF</Text>
+          <View style={styles.companyRow}>
+            {companies.map((c) => {
+              const active = selectedCompanyId === c.id;
+              return (
+                <TouchableOpacity
+                  key={c.id}
+                  style={[
+                    styles.companyChip,
+                    active
+                      ? { backgroundColor: c.color }
+                      : { backgroundColor: colors.surfaceElevated },
+                  ]}
+                  onPress={() => setSelectedCompanyId(c.id)}>
+                  <Text style={[styles.companyChipText, active && { color: colors.bg }]}>
+                    {c.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
 
-        {/* Company */}
-        <View style={styles.companyRow}>
-          {companies.map((c) => (
-            <TouchableOpacity
-              key={c.id}
-              style={[
-                styles.companyButton,
-                { borderColor: c.color },
-                selectedCompanyId === c.id && { backgroundColor: c.color },
-              ]}
-              onPress={() => setSelectedCompanyId(c.id)}>
-              <Text
-                style={[
-                  styles.companyButtonText,
-                  selectedCompanyId === c.id && { color: '#121212' },
-                ]}>
-                {c.name}
+        <View style={styles.mainCard}>
+          <View style={styles.timeGrid}>
+            <TouchableOpacity style={styles.timeInput} onPress={() => setShowStartPicker(true)}>
+              <Text style={styles.timeLabel}>START</Text>
+              <Text style={styles.timeValue}>{dateToTimeString(startTime)}</Text>
+            </TouchableOpacity>
+            <View style={styles.timeDivider}>
+              <Text style={styles.arrowIcon}>&#8594;</Text>
+            </View>
+            <TouchableOpacity style={styles.timeInput} onPress={() => setShowEndPicker(true)}>
+              <Text style={styles.timeLabel}>EIND</Text>
+              <Text style={styles.timeValue}>{dateToTimeString(endTime)}</Text>
+            </TouchableOpacity>
+          </View>
+
+          {showStartPicker && (
+            <DateTimePicker
+              value={startTime}
+              mode="time"
+              is24Hour
+              display="default"
+              onChange={onStartChange}
+            />
+          )}
+          {showEndPicker && (
+            <DateTimePicker
+              value={endTime}
+              mode="time"
+              is24Hour
+              display="default"
+              onChange={onEndChange}
+            />
+          )}
+
+          {rounded > 0 && (
+            <View style={styles.resultBar}>
+              <Text style={styles.resultText}>
+                {formatDuration(rounded)} {'·'}{' '}
+                <Text style={styles.resultAmount}>{formatEuro(previewAmount)}</Text>
               </Text>
-            </TouchableOpacity>
-          ))}
+            </View>
+          )}
         </View>
 
-        {/* Times */}
-        <View style={styles.timeRow}>
-          <View style={styles.timeBlock}>
-            <Text style={styles.label}>Starttijd</Text>
-            <TouchableOpacity style={styles.timeButton} onPress={() => setShowStartPicker(true)}>
-              <Text style={styles.timeButtonText}>{dateToTimeString(startTime)}</Text>
-            </TouchableOpacity>
-            {showStartPicker && (
-              <DateTimePicker value={startTime} mode="time" is24Hour display="default" onChange={onStartChange} />
-            )}
-          </View>
-          <Text style={styles.timeSep}>→</Text>
-          <View style={styles.timeBlock}>
-            <Text style={styles.label}>Eindtijd</Text>
-            <TouchableOpacity style={styles.timeButton} onPress={() => setShowEndPicker(true)}>
-              <Text style={styles.timeButtonText}>{dateToTimeString(endTime)}</Text>
-            </TouchableOpacity>
-            {showEndPicker && (
-              <DateTimePicker value={endTime} mode="time" is24Hour display="default" onChange={onEndChange} />
-            )}
-          </View>
+        <View style={styles.actionSection}>
+          <TextInput
+            style={styles.modernInput}
+            placeholder="Opmerking toevoegen..."
+            placeholderTextColor={colors.textDisabled}
+            value={note}
+            onChangeText={setNote}
+          />
+
+          <TouchableOpacity style={styles.primaryButton} onPress={handleSave}>
+            <Text style={styles.primaryButtonText}>Opslaan</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
+            <Text style={styles.deleteButtonText}>Dienst verwijderen</Text>
+          </TouchableOpacity>
         </View>
-
-        {/* Preview */}
-        {rounded > 0 && (
-          <View style={styles.previewBox}>
-            <Text style={styles.previewText}>
-              {formatDuration(rounded)} · {formatEuro(previewAmount)}
-            </Text>
-          </View>
-        )}
-
-        {/* Note */}
-        <TextInput
-          style={styles.input}
-          placeholder="Opmerking (optioneel)"
-          placeholderTextColor={Colors.textDisabled}
-          value={note}
-          onChangeText={setNote}
-        />
-
-        <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-          <Text style={styles.saveButtonText}>Opslaan</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
-          <Text style={styles.deleteButtonText}>Dienst verwijderen</Text>
-        </TouchableOpacity>
       </ScrollView>
+
+      <UndoToast
+        visible={showUndoToast}
+        message="Dienst verwijderd"
+        onUndo={handleUndoDelete}
+        onDismiss={handleToastDismiss}
+      />
+      {dialogNode}
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.bg },
-  content: { padding: 16, gap: 12, paddingBottom: 40 },
-  notFound: { color: Colors.textSecondary, textAlign: 'center', marginTop: 40 },
+function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.bg },
+    content: { padding: 20, gap: 12, paddingBottom: 40 },
+    notFound: { color: colors.textSecondary, textAlign: 'center', marginTop: 40 },
 
-  lockBanner: {
-    backgroundColor: Colors.surfaceElevated,
-    borderRadius: 8,
-    padding: 12,
-    borderLeftWidth: 3,
-    borderLeftColor: Colors.warning,
-  },
-  lockBannerText: { color: Colors.warning, fontWeight: '600' },
+    headerSection: { marginBottom: 8 },
+    headerTitle: { fontSize: 28, fontWeight: '800', color: colors.textPrimary, letterSpacing: -0.5 },
+    dateSelector: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: 4,
+      alignSelf: 'flex-start',
+      gap: 6,
+    },
+    dateSelectorText: {
+      color: colors.accentSecondary,
+      fontWeight: '600',
+      fontSize: 17,
+      textTransform: 'capitalize',
+    },
+    dateSelectorIcon: { color: colors.accentSecondary, fontSize: 14 },
 
-  dateButton: { backgroundColor: Colors.surface, borderRadius: 10, padding: 14 },
-  dateButtonText: { color: Colors.textPrimary, fontSize: 15 },
+    lockBanner: {
+      backgroundColor: colors.surfaceElevated,
+      borderRadius: 10,
+      padding: 12,
+      borderLeftWidth: 3,
+      borderLeftColor: colors.warning,
+    },
+    lockBannerText: { color: colors.warning, fontWeight: '600' },
 
-  companyRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  companyButton: {
-    borderWidth: 2,
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-  },
-  companyButtonText: { color: Colors.textPrimary, fontWeight: '600', fontSize: 14 },
+    companySection: { marginBottom: 2 },
+    sectionLabel: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: colors.textDisabled,
+      marginBottom: 10,
+      letterSpacing: 1,
+    },
+    companyRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    companyChip: {
+      borderRadius: 20,
+      paddingVertical: 8,
+      paddingHorizontal: 14,
+    },
+    companyChipText: { color: colors.textPrimary, fontWeight: '600', fontSize: 14 },
 
-  label: { color: Colors.textSecondary, fontSize: 12, marginBottom: 4 },
-  timeRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
-  timeBlock: { flex: 1 },
-  timeSep: { color: Colors.textSecondary, fontSize: 20, paddingBottom: 10 },
-  timeButton: {
-    backgroundColor: Colors.surface,
-    borderRadius: 10,
-    padding: 14,
-    alignItems: 'center',
-  },
-  timeButtonText: { fontSize: 20, fontWeight: '700', color: Colors.textPrimary },
+    mainCard: {
+      backgroundColor: colors.surface,
+      borderRadius: 24,
+      padding: 20,
+      marginBottom: 2,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.1,
+      shadowRadius: 12,
+      elevation: 5,
+    },
+    timeGrid: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    timeInput: { flex: 1, alignItems: 'center' },
+    timeLabel: {
+      fontSize: 10,
+      fontWeight: '700',
+      color: colors.textDisabled,
+      marginBottom: 4,
+      letterSpacing: 0.5,
+    },
+    timeValue: { fontSize: 32, fontWeight: '700', color: colors.textPrimary },
+    timeDivider: { paddingHorizontal: 10 },
+    arrowIcon: { fontSize: 20, color: colors.textDisabled },
+    resultBar: {
+      marginTop: 20,
+      paddingTop: 14,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.textDisabled,
+      alignItems: 'center',
+    },
+    resultText: { color: colors.textSecondary, fontSize: 16, fontWeight: '500' },
+    resultAmount: { color: colors.textPrimary, fontWeight: '700' },
 
-  previewBox: {
-    backgroundColor: Colors.surfaceElevated,
-    borderRadius: 8,
-    padding: 10,
-    alignItems: 'center',
-  },
-  previewText: { color: Colors.accent, fontWeight: '700', fontSize: 16 },
+    actionSection: { gap: 12, marginBottom: 4 },
+    modernInput: {
+      backgroundColor: colors.surfaceElevated,
+      borderRadius: 12,
+      padding: 16,
+      color: colors.textPrimary,
+      fontSize: 15,
+    },
 
-  input: {
-    backgroundColor: Colors.surface,
-    borderRadius: 10,
-    padding: 14,
-    color: Colors.textPrimary,
-    fontSize: 15,
-  },
+    primaryButton: {
+      backgroundColor: colors.accentSecondary,
+      borderRadius: 16,
+      padding: 18,
+      alignItems: 'center',
+      marginTop: 8,
+    },
+    primaryButtonText: { color: colors.onAccent, fontWeight: '700', fontSize: 16 },
 
-  saveButton: {
-    backgroundColor: Colors.accentSecondary,
-    borderRadius: 10,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  saveButtonText: { color: '#FFF', fontWeight: '700', fontSize: 16 },
-
-  deleteButton: {
-    borderWidth: 1,
-    borderColor: Colors.error,
-    borderRadius: 10,
-    padding: 14,
-    alignItems: 'center',
-  },
-  deleteButtonText: { color: Colors.error, fontWeight: '600', fontSize: 15 },
-});
+    deleteButton: {
+      borderWidth: 1,
+      borderColor: colors.error,
+      borderRadius: 16,
+      padding: 18,
+      alignItems: 'center',
+    },
+    deleteButtonText: { color: colors.error, fontWeight: '600', fontSize: 16 },
+  });
+}

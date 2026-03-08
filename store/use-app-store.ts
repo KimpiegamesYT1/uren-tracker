@@ -4,6 +4,7 @@ import { calculateBalance } from '../db/payments';
 import { getSetting, setSetting } from '../db/settings';
 import { Company } from '../db/schema';
 import { RoundingUnit, RoundingDirection } from '../utils/rounding';
+import { SETTINGS_KEYS } from '../constants/settings-keys';
 
 export type AppTheme = 'dark' | 'light' | 'system';
 
@@ -47,19 +48,35 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   loadSettings: () => {
-    const roundingUnit = Number(getSetting('rounding_unit', '1')) as RoundingUnit;
-    const roundingDirection = getSetting('rounding_direction', 'round') as RoundingDirection;
-    const theme = getSetting('theme', 'dark') as AppTheme;
-    const userName = getSetting('user_name', '');
+    const VALID_ROUNDING_UNITS: RoundingUnit[] = [1, 15, 30];
+    const VALID_ROUNDING_DIRECTIONS: RoundingDirection[] = ['up', 'down', 'round'];
+    const VALID_THEMES: AppTheme[] = ['dark', 'light', 'system'];
+
+    const rawUnit = Number(getSetting(SETTINGS_KEYS.roundingUnit, '1'));
+    const roundingUnit: RoundingUnit = VALID_ROUNDING_UNITS.includes(rawUnit as RoundingUnit)
+      ? (rawUnit as RoundingUnit)
+      : 1;
+
+    const rawDirection = getSetting(SETTINGS_KEYS.roundingDirection, 'round');
+    const roundingDirection: RoundingDirection = VALID_ROUNDING_DIRECTIONS.includes(rawDirection as RoundingDirection)
+      ? (rawDirection as RoundingDirection)
+      : 'round';
+
+    const rawTheme = getSetting(SETTINGS_KEYS.theme, 'dark');
+    const theme: AppTheme = VALID_THEMES.includes(rawTheme as AppTheme)
+      ? (rawTheme as AppTheme)
+      : 'dark';
+
+    const userName = getSetting(SETTINGS_KEYS.userName, '');
     set({ settings: { roundingUnit, roundingDirection, theme, userName } });
   },
 
   updateSetting: (key, value) => {
     const dbKeyMap: Record<keyof AppSettings, string> = {
-      roundingUnit: 'rounding_unit',
-      roundingDirection: 'rounding_direction',
-      theme: 'theme',
-      userName: 'user_name',
+      roundingUnit: SETTINGS_KEYS.roundingUnit,
+      roundingDirection: SETTINGS_KEYS.roundingDirection,
+      theme: SETTINGS_KEYS.theme,
+      userName: SETTINGS_KEYS.userName,
     };
     setSetting(dbKeyMap[key], String(value));
     set((state) => ({

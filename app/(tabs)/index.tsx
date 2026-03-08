@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   ScrollView,
   StyleSheet,
-  Alert,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
@@ -20,6 +19,7 @@ import { insertWorkEntry, getWorkEntriesByDate } from '@/db/work-entries';
 import { getExpensesByDate as fetchExpenses } from '@/db/expenses';
 import { useAppColors } from '@/hooks/use-app-colors';
 import { suggestCompanyForDate } from '@/utils/smart-company';
+import { useDialog } from '@/components/ui/app-dialog';
 import {
   roundMinutes,
   calcRawDuration,
@@ -40,6 +40,7 @@ export default function HomeScreen() {
   const { companies, settings, refreshBalance } = useAppStore();
   const { colors, uiTheme } = useAppColors();
   const styles = getStyles(colors);
+  const { show: showDialog, dialogNode } = useDialog();
 
   const today = new Date();
   const [selectedDate, setSelectedDate] = useState(today);
@@ -76,11 +77,11 @@ export default function HomeScreen() {
     } else if (companies.length > 0 && selectedCompanyId === null) {
       setSelectedCompanyId(companies[0].id);
     }
-  }, [selectedDate, companies]);
+  }, [selectedDate, companies, selectedCompanyId]);
 
   const handleSaveDienst = () => {
     if (!selectedCompanyId) {
-      Alert.alert('Geen bedrijf', 'Selecteer eerst een bedrijf.');
+      showDialog({ title: 'Geen bedrijf', message: 'Selecteer eerst een bedrijf.' });
       return;
     }
 
@@ -92,7 +93,7 @@ export default function HomeScreen() {
     const rawMinutes = calcRawDuration(startStr, endStr);
 
     if (rawMinutes <= 0) {
-      Alert.alert('Ongeldige tijd', 'Eindtijd moet na starttijd liggen.');
+      showDialog({ title: 'Ongeldige tijd', message: 'Eindtijd moet na starttijd liggen.' });
       return;
     }
 
@@ -100,14 +101,17 @@ export default function HomeScreen() {
     const amount = (rounded / 60) * company.hourly_rate;
     const dateStr = dateToDateString(selectedDate);
 
-    insertWorkEntry(dateStr, selectedCompanyId, startStr, endStr, note, rounded, amount);
-    refreshBalance();
-
-    // Prepare form for the next entry with workday defaults.
-    setNote('');
-    setStartTime(createTimeAt(9, 0));
-    setEndTime(createTimeAt(16, 0));
-    loadDayData();
+    try {
+      insertWorkEntry(dateStr, selectedCompanyId, startStr, endStr, note, rounded, amount);
+      refreshBalance();
+      // Prepare form for the next entry with workday defaults.
+      setNote('');
+      setStartTime(createTimeAt(9, 0));
+      setEndTime(createTimeAt(16, 0));
+      loadDayData();
+    } catch {
+      showDialog({ title: 'Fout', message: 'Kon de dienst niet opslaan. Probeer het opnieuw.' });
+    }
   };
 
   const onDateChange = (_: DateTimePickerEvent, date?: Date) => {
@@ -156,14 +160,17 @@ export default function HomeScreen() {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled">
 
-          {/* Header */}
-          <Text style={styles.header}>Uren Registreren</Text>
+          {/* Header context */}
+          <View style={styles.headerSection}>
+            <Text style={styles.headerTitle}>Uren Registreren</Text>
+            <TouchableOpacity style={styles.dateSelector} onPress={() => setShowDatePicker(true)}
+              accessibilityLabel={`Datum selecteren: ${formatDate(selectedDate)}`}
+              accessibilityRole="button">
+              <Text style={styles.dateSelectorText}>{formatDate(selectedDate)}</Text>
+              <Text style={styles.dateSelectorIcon}>▾</Text>
+            </TouchableOpacity>
+          </View>
 
-          {/* Date picker */}
-          <TouchableOpacity style={styles.dateButton} onPress={() => setShowDatePicker(true)}>
-            <Text style={styles.dateButtonText}>{formatDate(selectedDate)}</Text>
-            <Text style={styles.dateButtonIcon}>▼</Text>
-          </TouchableOpacity>
           {showDatePicker && (
             <DateTimePicker
               value={selectedDate}
@@ -174,106 +181,128 @@ export default function HomeScreen() {
             />
           )}
 
-          {/* Company selector */}
-          {companies.length === 0 ? (
-            <View style={styles.noCompanyBanner}>
-              <Text style={styles.noCompanyText}>
-                Voeg eerst een bedrijf toe via Instellingen.
-              </Text>
-            </View>
-          ) : (
-            <View style={styles.companyRow}>
-              {companies.map((c) => (
-                <TouchableOpacity
-                  key={c.id}
-                  style={[
-                    styles.companyButton,
-                    { borderColor: getCompanyDisplayColor(c.color, uiTheme) },
-                    selectedCompanyId === c.id && { backgroundColor: getCompanyDisplayColor(c.color, uiTheme) },
-                  ]}
-                  onPress={() => setSelectedCompanyId(c.id)}>
-                  <Text
-                    style={[
-                      styles.companyButtonText,
-                      selectedCompanyId === c.id && { color: uiTheme === 'dark' ? '#0E141B' : '#FFFFFF' },
-                    ]}>
-                    {c.name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-
-          {/* Time pickers */}
-          <View style={styles.timeRow}>
-            <View style={styles.timeBlock}>
-              <Text style={styles.label}>Starttijd</Text>
-              <TouchableOpacity
-                style={styles.timeButton}
-                onPress={() => setShowStartPicker(true)}>
-                <Text style={styles.timeButtonText}>{dateToTimeString(startTime)}</Text>
-              </TouchableOpacity>
-              {showStartPicker && (
-                <DateTimePicker
-                  value={startTime}
-                  mode="time"
-                  is24Hour
-                  display="default"
-                  onChange={onStartTimeChange}
-                />
-              )}
-            </View>
-
-            <Text style={styles.timeSeparator}>→</Text>
-
-            <View style={styles.timeBlock}>
-              <Text style={styles.label}>Eindtijd</Text>
-              <TouchableOpacity
-                style={styles.timeButton}
-                onPress={() => setShowEndPicker(true)}>
-                <Text style={styles.timeButtonText}>{dateToTimeString(endTime)}</Text>
-              </TouchableOpacity>
-              {showEndPicker && (
-                <DateTimePicker
-                  value={endTime}
-                  mode="time"
-                  is24Hour
-                  display="default"
-                  onChange={onEndTimeChange}
-                />
-              )}
-            </View>
+          {/* Company selection */}
+          <View style={styles.companySection}>
+            <Text style={styles.sectionLabel}>BEDRIJF</Text>
+            {companies.length === 0 ? (
+              <Text style={styles.noCompanyInlineText}>Voeg eerst een bedrijf toe via Instellingen.</Text>
+            ) : (
+              <View style={styles.companyRow}>
+                {companies.map((c) => {
+                  const isActive = selectedCompanyId === c.id;
+                  const companyColor = getCompanyDisplayColor(c.color, uiTheme);
+                  return (
+                    <TouchableOpacity
+                      key={c.id}
+                      style={[
+                        styles.companyChip,
+                        isActive
+                          ? { backgroundColor: companyColor }
+                          : { backgroundColor: colors.surfaceElevated },
+                      ]}
+                      onPress={() => setSelectedCompanyId(c.id)}
+                      accessibilityLabel={`Bedrijf: ${c.name}`}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: isActive }}>
+                      <View
+                        style={[
+                          styles.companyDot,
+                          { backgroundColor: isActive ? colors.onAccent : companyColor },
+                        ]}
+                      />
+                      <Text
+                        style={[
+                          styles.companyChipText,
+                          isActive && { color: uiTheme === 'dark' ? colors.bg : colors.surface },
+                        ]}>
+                        {c.name}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
           </View>
 
-          {/* Duration preview */}
-          {preview && (
-            <View style={styles.previewBox}>
-              <Text style={styles.previewText}>
-                {formatDuration(preview.rounded)} · {formatEuro(preview.amount)}
-              </Text>
+          {/* Interaction card */}
+          <View style={styles.mainCard}>
+            <View style={styles.timeGrid}>
+              <TouchableOpacity style={styles.timeInput} onPress={() => setShowStartPicker(true)}
+                accessibilityLabel={`Starttijd instellen: ${dateToTimeString(startTime)}`}
+                accessibilityRole="button">
+                <Text style={styles.timeLabel}>START</Text>
+                <Text style={styles.timeValue}>{dateToTimeString(startTime)}</Text>
+              </TouchableOpacity>
+
+              <View style={styles.timeDivider}>
+                <Text style={styles.arrowIcon}>→</Text>
+              </View>
+
+              <TouchableOpacity style={styles.timeInput} onPress={() => setShowEndPicker(true)}
+                accessibilityLabel={`Eindtijd instellen: ${dateToTimeString(endTime)}`}
+                accessibilityRole="button">
+                <Text style={styles.timeLabel}>EIND</Text>
+                <Text style={styles.timeValue}>{dateToTimeString(endTime)}</Text>
+              </TouchableOpacity>
             </View>
-          )}
 
-          {/* Note */}
-          <TextInput
-            style={styles.noteInput}
-            placeholder="Opmerking (optioneel)"
-            placeholderTextColor={colors.textDisabled}
-            value={note}
-            onChangeText={setNote}
-          />
+            {showStartPicker && (
+              <DateTimePicker
+                value={startTime}
+                mode="time"
+                is24Hour
+                display="default"
+                onChange={onStartTimeChange}
+              />
+            )}
+            {showEndPicker && (
+              <DateTimePicker
+                value={endTime}
+                mode="time"
+                is24Hour
+                display="default"
+                onChange={onEndTimeChange}
+              />
+            )}
 
-          {/* Save button */}
-          <TouchableOpacity style={styles.saveButton} onPress={handleSaveDienst}>
-            <Text style={styles.saveButtonText}>Dienst Opslaan</Text>
-          </TouchableOpacity>
+            {preview && (
+              <View style={styles.resultBar}>
+                {preview.rounded > 0 ? (
+                  <Text style={styles.resultText}>
+                    {formatDuration(preview.rounded)} ·{' '}
+                    <Text style={styles.resultAmount}>{formatEuro(preview.amount)}</Text>
+                  </Text>
+                ) : (
+                  <Text style={styles.previewWarning}>
+                    Afgerond naar 0 minuten - pas de tijden of afrondingsinstelling aan.
+                  </Text>
+                )}
+              </View>
+            )}
+          </View>
 
-          {/* Expense button */}
-          <TouchableOpacity
-            style={styles.expenseButton}
-            onPress={() => router.push('/modal')}>
-            <Text style={styles.expenseButtonText}>+ Losse Onkosten Toevoegen</Text>
-          </TouchableOpacity>
+          {/* Details and actions */}
+          <View style={styles.actionSection}>
+            <TextInput
+              style={styles.modernInput}
+              placeholder="Opmerking toevoegen..."
+              placeholderTextColor={colors.textDisabled}
+              value={note}
+              onChangeText={setNote}
+            />
+
+            <TouchableOpacity style={styles.primaryButton} onPress={handleSaveDienst}
+              accessibilityLabel="Dienst opslaan"
+              accessibilityRole="button">
+              <Text style={styles.primaryButtonText}>Dienst Opslaan</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.secondaryButton} onPress={() => router.push('/modal')}
+              accessibilityLabel="Onkosten toevoegen"
+              accessibilityRole="button">
+              <Text style={styles.secondaryButtonText}>+ Onkosten toevoegen</Text>
+            </TouchableOpacity>
+          </View>
 
           {/* Day overview */}
           {(dayEntries.length > 0 || dayExpenses.length > 0) && (
@@ -323,6 +352,7 @@ export default function HomeScreen() {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
+      {dialogNode}
     </SafeAreaView>
   );
 }
@@ -330,97 +360,117 @@ export default function HomeScreen() {
 function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
   return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
-  scrollContent: { padding: 16, paddingBottom: 40 },
-  header: { fontSize: 26, fontWeight: '700', color: colors.textPrimary, marginBottom: 16 },
+  scrollContent: { padding: 20, paddingBottom: 40 },
 
-  // Date
-  dateButton: {
+  headerSection: { marginBottom: 20 },
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: colors.textPrimary,
+    letterSpacing: -0.5,
+  },
+  dateSelector: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
+    marginTop: 4,
+    alignSelf: 'flex-start',
+    gap: 6,
   },
-  dateButtonText: { fontSize: 16, color: colors.textPrimary, textTransform: 'capitalize' },
-  dateButtonIcon: { color: colors.textSecondary, fontSize: 12 },
+  dateSelectorText: {
+    fontSize: 18,
+    color: colors.accentSecondary,
+    fontWeight: '600',
+    textTransform: 'capitalize',
+  },
+  dateSelectorIcon: { color: colors.accentSecondary, fontSize: 15 },
 
-  // Company
-  noCompanyBanner: {
-    backgroundColor: colors.surfaceElevated,
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 12,
+  companySection: { marginBottom: 18 },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textDisabled,
+    marginBottom: 10,
+    letterSpacing: 1,
   },
-  noCompanyText: { color: colors.warning, textAlign: 'center' },
-  companyRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
-  companyButton: {
-    borderWidth: 2,
-    borderRadius: 8,
+  noCompanyInlineText: { color: colors.textSecondary, fontSize: 14 },
+  companyRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  companyChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingVertical: 8,
     paddingHorizontal: 14,
+    borderRadius: 20,
   },
-  companyButtonText: { color: colors.textPrimary, fontWeight: '600', fontSize: 14 },
+  companyDot: { width: 8, height: 8, borderRadius: 4, marginRight: 8 },
+  companyChipText: { fontSize: 14, fontWeight: '600', color: colors.textPrimary },
 
-  // Time
-  label: { color: colors.textSecondary, fontSize: 12, marginBottom: 4 },
-  timeRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginBottom: 12 },
-  timeBlock: { flex: 1 },
-  timeSeparator: { color: colors.textSecondary, fontSize: 20, paddingBottom: 10 },
-  timeButton: {
+  mainCard: {
     backgroundColor: colors.surface,
-    borderRadius: 10,
-    padding: 14,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderRadius: 24,
+    padding: 20,
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 5,
   },
-  timeButtonText: { fontSize: 20, fontWeight: '700', color: colors.textPrimary, letterSpacing: 1 },
 
-  // Preview
-  previewBox: {
+  timeGrid: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  timeInput: { flex: 1, alignItems: 'center' },
+  timeLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.textDisabled,
+    marginBottom: 4,
+    letterSpacing: 0.5,
+  },
+  timeValue: {
+    fontSize: 32,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  timeDivider: { paddingHorizontal: 10 },
+  arrowIcon: { fontSize: 20, color: colors.textDisabled },
+
+  resultBar: {
+    marginTop: 20,
+    paddingTop: 15,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.textDisabled,
+    alignItems: 'center',
+  },
+  resultText: { fontSize: 16, color: colors.textSecondary, fontWeight: '500' },
+  resultAmount: { color: colors.textPrimary, fontWeight: '700' },
+  previewWarning: {
+    color: colors.warning,
+    fontWeight: '600',
+    fontSize: 13,
+    textAlign: 'center',
+  },
+
+  actionSection: { gap: 12, marginBottom: 24 },
+  modernInput: {
     backgroundColor: colors.surfaceElevated,
-    borderRadius: 8,
-    padding: 10,
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  previewText: { color: colors.accent, fontWeight: '700', fontSize: 16 },
-
-  // Note
-  noteInput: {
-    backgroundColor: colors.surface,
-    borderRadius: 10,
-    padding: 14,
+    borderRadius: 12,
+    padding: 16,
     color: colors.textPrimary,
     fontSize: 15,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
   },
-
-  // Buttons
-  saveButton: {
+  primaryButton: {
     backgroundColor: colors.accentSecondary,
-    borderRadius: 10,
-    padding: 16,
+    borderRadius: 16,
+    padding: 18,
     alignItems: 'center',
-    marginBottom: 10,
+    marginTop: 8,
   },
-  saveButtonText: { color: '#FFF', fontWeight: '700', fontSize: 16 },
-  expenseButton: {
-    borderWidth: 1,
-    borderColor: colors.info,
-    borderRadius: 10,
-    padding: 14,
-    alignItems: 'center',
-    marginBottom: 24,
-    backgroundColor: colors.surface,
-  },
-  expenseButtonText: { color: colors.info, fontWeight: '600', fontSize: 15 },
+  primaryButtonText: { color: colors.onAccent, fontWeight: '700', fontSize: 16 },
+  secondaryButton: { padding: 12, alignItems: 'center' },
+  secondaryButtonText: { color: colors.accentSecondary, fontWeight: '600', fontSize: 14 },
 
   // Day list
   dayList: { gap: 8 },
@@ -438,8 +488,6 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
     borderRadius: 10,
     overflow: 'hidden',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
   },
   entryColorBar: { width: 4, alignSelf: 'stretch' },
   entryInfo: { flex: 1, padding: 12 },
@@ -448,7 +496,7 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
   entryNote: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
   entryRight: { padding: 12, alignItems: 'flex-end', gap: 2 },
   entryHours: { color: colors.textSecondary, fontSize: 12 },
-  entryAmount: { color: colors.accent, fontWeight: '700', fontSize: 15 },
+  entryAmount: { color: colors.textPrimary, fontWeight: '700', fontSize: 15 },
   lockIcon: { fontSize: 12 },
 });
 }

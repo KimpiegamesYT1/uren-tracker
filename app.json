@@ -13,7 +13,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#2E546A",
+        "backgroundColor": "#121212",
         "foregroundImage": "./assets/images/app-icon-playstore.png"
       },
       "edgeToEdgeEnabled": true,
@@ -38,7 +38,7 @@
           "resizeMode": "contain",
           "backgroundColor": "#ffffff",
           "dark": {
-            "backgroundColor": "#000000"
+            "backgroundColor": "#121212"
           }
         }
       ],
@@ -48,7 +48,8 @@
         {
           "cameraPermission": "De app gebruikt de camera om bonfoto's te maken."
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true,

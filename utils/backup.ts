@@ -2,13 +2,12 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as Print from 'expo-print';
 import { Platform } from 'react-native';
-import { getDb } from '../db/schema';
-import { getAllUnpaidWorkEntries } from '../db/work-entries';
-import { getWorkEntriesByMonth } from '../db/work-entries';
+import { getDb, Expense, WorkEntry } from '../db/schema';
+import { getAllUnpaidWorkEntries, getWorkEntriesByMonth } from '../db/work-entries';
 import { getAllUnpaidExpenses, getExpensesByMonth } from '../db/expenses';
 import { formatDuration } from './rounding';
 import { formatEuro } from '../constants/colors';
-import { Expense, WorkEntry } from '../db/schema';
+
 
 export type HoursPdfScope =
   | { type: 'open' }
@@ -330,8 +329,37 @@ export async function exportHoursPdf(
 export function importFromJSON(json: string): { success: boolean; error?: string } {
   try {
     const data: BackupData = JSON.parse(json);
-    if (!data.version || !data.companies) {
-      return { success: false, error: 'Ongeldig backup-bestand.' };
+
+    if (
+      typeof data.version !== 'number' ||
+      !Array.isArray(data.companies) ||
+      !Array.isArray(data.work_entries) ||
+      !Array.isArray(data.expenses) ||
+      !Array.isArray(data.payments) ||
+      !Array.isArray(data.settings)
+    ) {
+      return { success: false, error: 'Ongeldig backup-bestand. Verplichte velden ontbreken.' };
+    }
+
+    for (const c of data.companies as any[]) {
+      if (!c.id || typeof c.name !== 'string' || !c.name.trim()) {
+        return { success: false, error: 'Backup beschadigd: een bedrijf mist een naam.' };
+      }
+      if (typeof c.hourly_rate !== 'number' || c.hourly_rate < 0) {
+        return { success: false, error: 'Backup beschadigd: ongeldig uurtarief in bedrijfsdata.' };
+      }
+    }
+
+    for (const we of data.work_entries as any[]) {
+      if (!we.id || !we.date || !we.company_id || !we.start_time || !we.end_time) {
+        return { success: false, error: 'Backup beschadigd: een werkentry mist verplichte velden.' };
+      }
+    }
+
+    for (const p of data.payments as any[]) {
+      if (!p.id || !p.date || typeof p.amount !== 'number') {
+        return { success: false, error: 'Backup beschadigd: een betaling mist verplichte velden.' };
+      }
     }
 
     const db = getDb();

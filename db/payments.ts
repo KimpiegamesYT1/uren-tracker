@@ -24,13 +24,15 @@ export function deletePayment(id: number): void {
 }
 
 /**
+/**
  * Recalculates all payment applications from scratch.
  * Resets all work entries and expenses to unpaid, then re-applies all payments in chronological order.
+ * Must be called after any payment is deleted or updated to keep amount_paid consistent.
  */
 export function recalculateAllPayments(): void {
   const db = getDb();
-  db.runSync('UPDATE work_entries SET amount_paid = 0, is_locked = 0');
-  db.runSync('UPDATE expenses SET amount_paid = 0, is_locked = 0');
+  db.runSync('UPDATE work_entries SET amount_paid = 0, is_locked = 0 WHERE deleted_at IS NULL');
+  db.runSync('UPDATE expenses SET amount_paid = 0, is_locked = 0 WHERE deleted_at IS NULL');
 
   const payments = db.getAllSync<Payment>(
     'SELECT * FROM payments ORDER BY date ASC, created_at ASC'
@@ -110,16 +112,18 @@ export function applyPayment(amount: number): void {
   }
 }
 
+/**
+ * Calculates the total outstanding balance: sum of all work entry and expense amounts
+ * minus the sum of all registered payments.
+ */
 export function calculateBalance(): number {
   const db = getDb();
-  const workResult = db.getFirstSync<{ total: number }>(
-    'SELECT COALESCE(SUM(amount), 0) as total FROM work_entries'
-  );
-  const expenseResult = db.getFirstSync<{ total: number }>(
-    'SELECT COALESCE(SUM(amount), 0) as total FROM expenses'
-  );
-  const paymentResult = db.getFirstSync<{ total: number }>(
-    'SELECT COALESCE(SUM(amount), 0) as total FROM payments'
-  );
-  return (workResult?.total ?? 0) + (expenseResult?.total ?? 0) - (paymentResult?.total ?? 0);
+  const result = db.getFirstSync<{ balance: number }>(`
+    SELECT
+      (SELECT COALESCE(SUM(amount), 0) FROM work_entries WHERE deleted_at IS NULL)
+      + (SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE deleted_at IS NULL)
+      - (SELECT COALESCE(SUM(amount), 0) FROM payments)
+      AS balance
+  `);
+  return result?.balance ?? 0;
 }

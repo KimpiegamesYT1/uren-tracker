@@ -6,7 +6,7 @@ export function getExpensesByDate(date: string): Expense[] {
     `SELECT e.*, c.name as company_name, c.color as company_color
      FROM expenses e
      LEFT JOIN companies c ON e.company_id = c.id
-     WHERE e.date = ?
+     WHERE e.date = ? AND e.deleted_at IS NULL
      ORDER BY e.created_at ASC`,
     [date]
   );
@@ -19,7 +19,7 @@ export function getExpensesByMonth(year: number, month: number): Expense[] {
     `SELECT e.*, c.name as company_name, c.color as company_color
      FROM expenses e
      LEFT JOIN companies c ON e.company_id = c.id
-     WHERE e.date LIKE ?
+     WHERE e.date LIKE ? AND e.deleted_at IS NULL
      ORDER BY e.date ASC, e.created_at ASC`,
     [`${prefix}%`]
   );
@@ -31,7 +31,7 @@ export function getAllUnpaidExpenses(): Expense[] {
     `SELECT e.*, c.name as company_name, c.color as company_color
      FROM expenses e
      LEFT JOIN companies c ON e.company_id = c.id
-     WHERE e.amount_paid < e.amount
+     WHERE e.amount_paid < e.amount AND e.deleted_at IS NULL
      ORDER BY e.date ASC, e.created_at ASC`
   );
 }
@@ -76,5 +76,10 @@ export function updateExpensePayment(id: number, amountPaid: number, isLocked: n
 
 export function deleteExpense(id: number): void {
   const db = getDb();
-  db.runSync('DELETE FROM expenses WHERE id = ?', [id]);
+  db.runSync("UPDATE expenses SET deleted_at = datetime('now') WHERE id = ?", [id]);
+}
+
+export function restoreExpense(id: number): void {
+  const db = getDb();
+  db.runSync('UPDATE expenses SET deleted_at = NULL WHERE id = ?', [id]);
 }
