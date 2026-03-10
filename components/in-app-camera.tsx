@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Modal,
   StyleSheet,
@@ -23,20 +23,32 @@ export function InAppCamera({ visible, onClose, onCapture }: InAppCameraProps) {
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView | null>(null);
   const [isCapturing, setIsCapturing] = useState(false);
+  const [isCameraReady, setIsCameraReady] = useState(false);
   const { show: showDialog, dialogNode } = useDialog();
 
+  useEffect(() => {
+    if (!visible) {
+      setIsCameraReady(false);
+      setIsCapturing(false);
+    }
+  }, [visible]);
+
   const handleTakePhoto = async () => {
-    if (!cameraRef.current || isCapturing) return;
+    if (!cameraRef.current || isCapturing || !isCameraReady) return;
 
     try {
       setIsCapturing(true);
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.7 });
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.7, skipProcessing: true });
       if (!photo?.uri) {
         showDialog({ title: 'Fout', message: 'Foto maken is mislukt.' });
         return;
       }
-      await onCapture(photo.uri);
-      onClose();
+      try {
+        await onCapture(photo.uri);
+        onClose();
+      } catch {
+        showDialog({ title: 'Fout', message: 'Foto kon niet worden opgeslagen. Probeer het opnieuw.' });
+      }
     } catch {
       showDialog({ title: 'Fout', message: 'Foto maken is mislukt.' });
     } finally {
@@ -70,7 +82,13 @@ export function InAppCamera({ visible, onClose, onCapture }: InAppCameraProps) {
           renderPermissionView()
         ) : (
           <>
-            <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" />
+            <CameraView
+              ref={cameraRef}
+              style={StyleSheet.absoluteFill}
+              facing="back"
+              active={visible}
+              onCameraReady={() => setIsCameraReady(true)}
+            />
             <View style={styles.overlayTop}>
               <TouchableOpacity style={styles.closeButton} onPress={onClose}
                 accessibilityLabel="Camera sluiten"
@@ -80,13 +98,13 @@ export function InAppCamera({ visible, onClose, onCapture }: InAppCameraProps) {
             </View>
             <View style={styles.overlayBottom}>
               <TouchableOpacity
-                style={[styles.captureButton, isCapturing && styles.captureButtonDisabled]}
+                style={[styles.captureButton, (isCapturing || !isCameraReady) && styles.captureButtonDisabled]}
                 onPress={handleTakePhoto}
-                disabled={isCapturing}
+                disabled={isCapturing || !isCameraReady}
                 accessibilityLabel={isCapturing ? 'Foto wordt opgeslagen' : 'Foto maken'}
                 accessibilityRole="button">
                 <Text style={styles.captureButtonText}>
-                  {isCapturing ? 'Opslaan...' : 'Foto maken'}
+                  {isCapturing ? 'Opslaan...' : isCameraReady ? 'Foto maken' : 'Camera laden...'}
                 </Text>
               </TouchableOpacity>
             </View>

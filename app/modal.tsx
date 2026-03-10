@@ -59,6 +59,20 @@ export default function ExpenseModalScreen() {
     }
   }, []);
 
+  useEffect(() => {
+    if (companies.length === 1) {
+      const onlyCompanyId = companies[0].id;
+      if (selectedCompanyId !== onlyCompanyId) {
+        setSelectedCompanyId(onlyCompanyId);
+      }
+      return;
+    }
+
+    if (companies.length > 1 && selectedCompanyId !== null && !companies.some((c) => c.id === selectedCompanyId)) {
+      setSelectedCompanyId(companies[0].id);
+    }
+  }, [companies, selectedCompanyId]);
+
   const handleSave = () => {
     const parsedAmount = parseFloat(amount.replace(',', '.'));
     if (!description.trim()) {
@@ -88,7 +102,11 @@ export default function ExpenseModalScreen() {
     await ensureReceiptsDir();
     const fileName = `receipt_${Date.now()}.jpg`;
     const destUri = `${RECEIPTS_DIR}${fileName}`;
-    await FileSystem.copyAsync({ from: sourceUri, to: destUri });
+    try {
+      await FileSystem.copyAsync({ from: sourceUri, to: destUri });
+    } catch {
+      await FileSystem.moveAsync({ from: sourceUri, to: destUri });
+    }
     setReceiptUri(destUri);
   };
 
@@ -137,34 +155,38 @@ export default function ExpenseModalScreen() {
             autoFocus
           />
 
-          <Text style={styles.sectionLabel}>BEDRIJF</Text>
-          <View style={styles.companyRow}>
-            {companies.map((company) => (
-              <TouchableOpacity
-                key={company.id}
-                style={[
-                  styles.companyChip,
-                  selectedCompanyId === company.id && {
-                    backgroundColor: getCompanyDisplayColor(company.color, uiTheme),
-                  },
-                ]}
-                onPress={() => setSelectedCompanyId(company.id)}>
-                <Text
-                  style={[
-                    styles.companyChipText,
-                    selectedCompanyId === company.id && {
-                      color: uiTheme === 'dark' ? colors.bg : colors.surface,
-                      fontWeight: '700',
-                    },
-                  ]}>
-                  {company.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          {companies.length === 0 ? (
-            <Text style={styles.helperText}>Voeg eerst een bedrijf toe in Instellingen.</Text>
-          ) : null}
+          {companies.length !== 1 && (
+            <>
+              <Text style={styles.sectionLabel}>BEDRIJF</Text>
+              <View style={styles.companyRow}>
+                {companies.map((company) => (
+                  <TouchableOpacity
+                    key={company.id}
+                    style={[
+                      styles.companyChip,
+                      selectedCompanyId === company.id && {
+                        backgroundColor: getCompanyDisplayColor(company.color, uiTheme),
+                      },
+                    ]}
+                    onPress={() => setSelectedCompanyId(company.id)}>
+                    <Text
+                      style={[
+                        styles.companyChipText,
+                        selectedCompanyId === company.id && {
+                          color: uiTheme === 'dark' ? colors.bg : colors.surface,
+                          fontWeight: '700',
+                        },
+                      ]}>
+                      {company.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {companies.length === 0 ? (
+                <Text style={styles.helperText}>Voeg eerst een bedrijf toe in Instellingen.</Text>
+              ) : null}
+            </>
+          )}
 
           <TextInput
             style={styles.modernInput}

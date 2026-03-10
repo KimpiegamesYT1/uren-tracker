@@ -71,6 +71,19 @@ export default function HomeScreen() {
 
   // Auto-suggest company when date changes
   useEffect(() => {
+    if (companies.length === 1) {
+      const onlyCompanyId = companies[0].id;
+      if (selectedCompanyId !== onlyCompanyId) {
+        setSelectedCompanyId(onlyCompanyId);
+      }
+      return;
+    }
+
+    if (companies.length > 1 && selectedCompanyId !== null && !companies.some((c) => c.id === selectedCompanyId)) {
+      setSelectedCompanyId(companies[0].id);
+      return;
+    }
+
     const suggested = suggestCompanyForDate(selectedDate);
     if (suggested !== null) {
       setSelectedCompanyId(suggested);
@@ -182,47 +195,49 @@ export default function HomeScreen() {
           )}
 
           {/* Company selection */}
-          <View style={styles.companySection}>
-            <Text style={styles.sectionLabel}>BEDRIJF</Text>
-            {companies.length === 0 ? (
-              <Text style={styles.noCompanyInlineText}>Voeg eerst een bedrijf toe via Instellingen.</Text>
-            ) : (
-              <View style={styles.companyRow}>
-                {companies.map((c) => {
-                  const isActive = selectedCompanyId === c.id;
-                  const companyColor = getCompanyDisplayColor(c.color, uiTheme);
-                  return (
-                    <TouchableOpacity
-                      key={c.id}
-                      style={[
-                        styles.companyChip,
-                        isActive
-                          ? { backgroundColor: companyColor }
-                          : { backgroundColor: colors.surfaceElevated },
-                      ]}
-                      onPress={() => setSelectedCompanyId(c.id)}
-                      accessibilityLabel={`Bedrijf: ${c.name}`}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: isActive }}>
-                      <View
+          {companies.length !== 1 && (
+            <View style={styles.companySection}>
+              <Text style={styles.sectionLabel}>BEDRIJF</Text>
+              {companies.length === 0 ? (
+                <Text style={styles.noCompanyInlineText}>Voeg eerst een bedrijf toe via Instellingen.</Text>
+              ) : (
+                <View style={styles.companyRow}>
+                  {companies.map((c) => {
+                    const isActive = selectedCompanyId === c.id;
+                    const companyColor = getCompanyDisplayColor(c.color, uiTheme);
+                    return (
+                      <TouchableOpacity
+                        key={c.id}
                         style={[
-                          styles.companyDot,
-                          { backgroundColor: isActive ? colors.onAccent : companyColor },
+                          styles.companyChip,
+                          isActive
+                            ? { backgroundColor: companyColor }
+                            : { backgroundColor: colors.surfaceElevated },
                         ]}
-                      />
-                      <Text
-                        style={[
-                          styles.companyChipText,
-                          isActive && { color: uiTheme === 'dark' ? colors.bg : colors.surface },
-                        ]}>
-                        {c.name}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            )}
-          </View>
+                        onPress={() => setSelectedCompanyId(c.id)}
+                        accessibilityLabel={`Bedrijf: ${c.name}`}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: isActive }}>
+                        <View
+                          style={[
+                            styles.companyDot,
+                            { backgroundColor: isActive ? colors.onAccent : companyColor },
+                          ]}
+                        />
+                        <Text
+                          style={[
+                            styles.companyChipText,
+                            isActive && { color: uiTheme === 'dark' ? colors.bg : colors.surface },
+                          ]}>
+                          {c.name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
+          )}
 
           {/* Interaction card */}
           <View style={styles.mainCard}>

@@ -11,8 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { formatEuro } from '@/constants/colors';
 import { getWorkEntriesByMonth } from '@/db/work-entries';
-import { getExpensesByMonth } from '@/db/expenses';
-import { WorkEntry, Expense } from '@/db/schema';
+import { WorkEntry } from '@/db/schema';
 import { formatDuration } from '@/utils/rounding';
 import { useAppColors } from '@/hooks/use-app-colors';
 
@@ -21,10 +20,6 @@ const MONTH_NAMES = [
   'Juli', 'Augustus', 'September', 'Oktober', 'November', 'December',
 ];
 
-type ListItem =
-  | (WorkEntry & { itemType: 'work' })
-  | (Expense & { itemType: 'expense' });
-
 export default function MonthDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -32,66 +27,46 @@ export default function MonthDetailScreen() {
   const styles = getStyles(colors);
 
   const [year, month] = (id ?? '').split('-').map(Number);
-  const [items, setItems] = useState<ListItem[]>([]);
+  const [items, setItems] = useState<WorkEntry[]>([]);
   const [totalHours, setTotalHours] = useState(0);
   const [totalAmount, setTotalAmount] = useState(0);
 
   useFocusEffect(
     useCallback(() => {
       if (!year || !month) return;
-      const entries = getWorkEntriesByMonth(year, month).map((e) => ({ ...e, itemType: 'work' as const }));
-      const expenses = getExpensesByMonth(year, month).map((e) => ({ ...e, itemType: 'expense' as const }));
-
-      const combined: ListItem[] = [...entries, ...expenses].sort((a, b) => {
+      const entries = getWorkEntriesByMonth(year, month).sort((a, b) => {
         const da = a.date.localeCompare(b.date);
         if (da !== 0) return da;
         return a.created_at.localeCompare(b.created_at);
       });
 
-      setItems(combined);
+      setItems(entries);
       const hrs = entries.reduce((sum, e) => sum + e.duration_minutes, 0);
-      const amt = entries.reduce((sum, e) => sum + e.amount, 0) +
-        expenses.reduce((sum, e) => sum + e.amount, 0);
+      const amt = entries.reduce((sum, e) => sum + e.amount, 0);
       setTotalHours(hrs);
       setTotalAmount(amt);
     }, [year, month])
   );
 
-  const renderItem = ({ item }: { item: ListItem }) => (
+  const renderItem = ({ item }: { item: WorkEntry }) => (
     <TouchableOpacity
       style={styles.itemRow}
-      onPress={() => {
-        if (item.itemType === 'work') router.push(`/entry/${item.id}`);
-        else router.push(`/expense/${item.id}`);
-      }}>
+      onPress={() => router.push(`/entry/${item.id}`)}>
       <View
         style={[
           styles.itemBar,
-          {
-            backgroundColor:
-              item.itemType === 'work'
-                ? (item as WorkEntry).company_color ?? colors.accentSecondary
-                : colors.warning,
-          },
+          { backgroundColor: item.company_color ?? colors.accentSecondary },
         ]}
       />
       <View style={styles.itemContent}>
         <Text style={styles.itemDate}>{item.date}</Text>
-        {item.itemType === 'work' ? (
-          <>
-            <Text style={styles.itemTitle}>{(item as WorkEntry).company_name}</Text>
-            <Text style={styles.itemSub}>
-              {(item as WorkEntry).start_time} – {(item as WorkEntry).end_time} · {formatDuration((item as WorkEntry).duration_minutes)}
-            </Text>
-            {(item as WorkEntry).note ? (
-              <Text style={styles.itemNote}>{(item as WorkEntry).note}</Text>
-            ) : null}
-          </>
-        ) : (
-          <>
-            <Text style={styles.itemTitle}>{(item as Expense).description || 'Onkost'}</Text>
-          </>
-        )}
+        <Text style={styles.itemTitle}>{item.company_name}</Text>
+        <Text style={styles.itemSub}>
+          {item.start_time} – {item.end_time} · {formatDuration(item.duration_minutes)}
+        </Text>
+        {item.note ? (
+          <Text style={styles.itemNote}>{item.note}</Text>
+        ) : null}
       </View>
       <View style={styles.itemRight}>
         <Text style={styles.itemAmount}>{formatEuro(item.amount)}</Text>
@@ -123,7 +98,7 @@ export default function MonthDetailScreen() {
 
       <FlatList
         data={items}
-        keyExtractor={(item) => `${item.itemType}-${item.id}`}
+        keyExtractor={(item) => String(item.id)}
         renderItem={renderItem}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={

@@ -70,6 +70,20 @@ export default function EntryScreen() {
     }
   }, [id]);
 
+  useEffect(() => {
+    if (companies.length === 1) {
+      const onlyCompanyId = companies[0].id;
+      if (selectedCompanyId !== onlyCompanyId) {
+        setSelectedCompanyId(onlyCompanyId);
+      }
+      return;
+    }
+
+    if (companies.length > 1 && selectedCompanyId !== null && !companies.some((c) => c.id === selectedCompanyId)) {
+      setSelectedCompanyId(companies[0].id);
+    }
+  }, [companies, selectedCompanyId]);
+
   const startStr = dateToTimeString(startTime);
   const endStr = dateToTimeString(endTime);
   const rawMinutes = calcRawDuration(startStr, endStr);
@@ -203,29 +217,35 @@ export default function EntryScreen() {
           </View>
         )}
 
-        <View style={styles.companySection}>
-          <Text style={styles.sectionLabel}>BEDRIJF</Text>
-          <View style={styles.companyRow}>
-            {companies.map((c) => {
-              const active = selectedCompanyId === c.id;
-              return (
-                <TouchableOpacity
-                  key={c.id}
-                  style={[
-                    styles.companyChip,
-                    active
-                      ? { backgroundColor: c.color }
-                      : { backgroundColor: colors.surfaceElevated },
-                  ]}
-                  onPress={() => setSelectedCompanyId(c.id)}>
-                  <Text style={[styles.companyChipText, active && { color: colors.bg }]}>
-                    {c.name}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
+        {companies.length !== 1 && (
+          <View style={styles.companySection}>
+            <Text style={styles.sectionLabel}>BEDRIJF</Text>
+            {companies.length === 0 ? (
+              <Text style={styles.helperText}>Voeg eerst een bedrijf toe in Instellingen.</Text>
+            ) : (
+              <View style={styles.companyRow}>
+                {companies.map((c) => {
+                  const active = selectedCompanyId === c.id;
+                  return (
+                    <TouchableOpacity
+                      key={c.id}
+                      style={[
+                        styles.companyChip,
+                        active
+                          ? { backgroundColor: c.color }
+                          : { backgroundColor: colors.surfaceElevated },
+                      ]}
+                      onPress={() => setSelectedCompanyId(c.id)}>
+                      <Text style={[styles.companyChipText, active && { color: colors.bg }]}>
+                        {c.name}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
           </View>
-        </View>
+        )}
 
         <View style={styles.mainCard}>
           <View style={styles.timeGrid}>
@@ -341,6 +361,7 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
       marginBottom: 10,
       letterSpacing: 1,
     },
+    helperText: { color: colors.textSecondary, marginBottom: 6 },
     companyRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
     companyChip: {
       borderRadius: 20,
