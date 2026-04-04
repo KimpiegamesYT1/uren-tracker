@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -36,9 +36,9 @@ async function ensureReceiptsDir() {
 export default function ExpenseModalScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ date?: string }>();
-  const { refreshBalance } = useAppStore();
+  const refreshBalance = useAppStore((s) => s.refreshBalance);
   const { colors, uiTheme } = useAppColors();
-  const styles = getStyles(colors);
+  const styles = useMemo(() => getStyles(colors), [colors]);
   const { show: showDialog, dialogNode } = useDialog();
 
   const initialDate = params.date ? dateStringToDate(params.date) : new Date();

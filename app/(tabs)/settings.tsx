@@ -36,7 +36,9 @@ const MONTH_NAMES = [
 ];
 
 export default function SettingsScreen() {
-  const { settings, updateSetting, loadCompanies } = useAppStore();
+  const settings = useAppStore((s) => s.settings);
+  const updateSetting = useAppStore((s) => s.updateSetting);
+  const loadCompanies = useAppStore((s) => s.loadCompanies);
   const { colors, uiTheme } = useAppColors();
 
   const companyPresets = useMemo(() => getCompanyColorPresets(uiTheme), [uiTheme]);
@@ -60,7 +62,7 @@ export default function SettingsScreen() {
     color: companyPresets[0],
   });
 
-  const styles = getStyles(colors);
+  const styles = useMemo(() => getStyles(colors), [colors]);
 
   useFocusEffect(
     useCallback(() => {

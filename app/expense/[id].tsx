@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -37,9 +37,9 @@ async function ensureReceiptsDir() {
 export default function ExpenseScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { refreshBalance } = useAppStore();
+  const refreshBalance = useAppStore((s) => s.refreshBalance);
   const { colors, uiTheme } = useAppColors();
-  const styles = getStyles(colors);
+  const styles = useMemo(() => getStyles(colors), [colors]);
   const { show: showDialog, dialogNode } = useDialog();
 
   const isNew = !id || id === 'new';

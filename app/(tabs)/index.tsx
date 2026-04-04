@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -37,9 +37,11 @@ function createTimeAt(hours: number, minutes: number): Date {
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { companies, settings, refreshBalance } = useAppStore();
+  const companies = useAppStore((s) => s.companies);
+  const settings = useAppStore((s) => s.settings);
+  const refreshBalance = useAppStore((s) => s.refreshBalance);
   const { colors, uiTheme } = useAppColors();
-  const styles = getStyles(colors);
+  const styles = useMemo(() => getStyles(colors), [colors]);
   const { show: showDialog, dialogNode } = useDialog();
 
   const today = new Date();

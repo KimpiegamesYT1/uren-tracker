@@ -1,6 +1,7 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import * as SystemUI from 'expo-system-ui';
 import { useEffect } from 'react';
 import 'react-native-reanimated';
 
@@ -33,6 +34,10 @@ export default function RootLayout() {
     refreshBalance();
   }, [loadCompanies, loadSettings, refreshBalance]);
 
+  useEffect(() => {
+    void SystemUI.setBackgroundColorAsync(uiColors.bg);
+  }, [uiColors.bg]);
+
   return (
     <ThemeProvider value={navTheme}>
       <Stack screenOptions={{ contentStyle: { backgroundColor: uiColors.bg } }}>
@@ -42,7 +47,7 @@ export default function RootLayout() {
         <Stack.Screen name="entry/[id]" options={{ title: 'Dienst bewerken', headerStyle: { backgroundColor: uiColors.surface }, headerTintColor: uiColors.textPrimary }} />
         <Stack.Screen name="expense/[id]" options={{ title: 'Onkost bewerken', headerStyle: { backgroundColor: uiColors.surface }, headerTintColor: uiColors.textPrimary }} />
       </Stack>
-      <StatusBar style={resolvedTheme === 'dark' ? 'light' : 'dark'} />
+      <StatusBar style={resolvedTheme === 'dark' ? 'light' : 'dark'} backgroundColor={uiColors.bg} />
     </ThemeProvider>
   );
 }

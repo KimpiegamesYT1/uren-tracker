@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -91,10 +91,13 @@ function formatDisplayDate(date: string): string {
 
 export default function BalanceScreen() {
   const router = useRouter();
-  const { balance, refreshBalance, companies } = useAppStore();
+  const balance = useAppStore((s) => s.balance);
+  const refreshBalance = useAppStore((s) => s.refreshBalance);
+  const companies = useAppStore((s) => s.companies);
   const { colors, uiTheme } = useAppColors();
-  const styles = getStyles(colors);
+  const styles = useMemo(() => getStyles(colors), [colors]);
   const { show: showDialog, dialogNode } = useDialog();
+  const showCompanyInTitle = companies.length > 1;
 
   const [activeTab, setActiveTab] = useState<'openstaand' | 'history'>('openstaand');
   const [unpaidItems, setUnpaidItems] = useState<UnpaidItem[]>([]);
@@ -181,12 +184,11 @@ export default function BalanceScreen() {
     loadData();
   };
 
-  const renderUnpaidItem = ({ item }: { item: UnpaidItem }) => {
+  const renderUnpaidItem = useCallback(({ item }: { item: UnpaidItem }) => {
     const remaining = item.amount - item.amount_paid;
     const isPartial = item.amount_paid > 0;
     const formattedDate = formatDisplayDate(item.date);
     const isWork = item.itemType === 'work';
-    const showCompanyInTitle = companies.length > 1;
     const companyName = item.company_name ?? (isWork ? 'Bedrijf' : 'Geen bedrijf');
     const companyColor = item.company_color
       ? getCompanyDisplayColor(item.company_color, uiTheme)
@@ -248,9 +250,9 @@ export default function BalanceScreen() {
       </View>
       </TouchableOpacity>
     );
-  };
+  }, [colors.accentSecondary, colors.surface, router, showCompanyInTitle, styles, uiTheme]);
 
-  const renderPayment = ({ item }: { item: Payment }) => (
+  const renderPayment = useCallback(({ item }: { item: Payment }) => (
     <TouchableOpacity onPress={() => handlePaymentPress(item)} activeOpacity={0.7}>
       <View style={styles.listItem}>
         <View style={[styles.listItemBar, { backgroundColor: colors.accent }]} />
@@ -267,7 +269,10 @@ export default function BalanceScreen() {
         </View>
       </View>
     </TouchableOpacity>
-  );
+  ), [colors.accent, styles]);
+
+  const unpaidKeyExtractor = useCallback((item: UnpaidItem) => `${item.itemType}-${item.id}`, []);
+  const paymentKeyExtractor = useCallback((item: Payment) => String(item.id), []);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -314,9 +319,14 @@ export default function BalanceScreen() {
       {activeTab === 'openstaand' ? (
         <FlatList
           data={unpaidItems}
-          keyExtractor={(item) => `${item.itemType}-${item.id}`}
+          keyExtractor={unpaidKeyExtractor}
           renderItem={renderUnpaidItem}
           contentContainerStyle={styles.listContent}
+          initialNumToRender={12}
+          maxToRenderPerBatch={12}
+          windowSize={9}
+          updateCellsBatchingPeriod={16}
+          removeClippedSubviews
           ListEmptyComponent={
             <Text style={styles.emptyText}>Geen openstaande posten. Alles is betaald.</Text>
           }
@@ -324,9 +334,14 @@ export default function BalanceScreen() {
       ) : (
         <FlatList
           data={payments}
-          keyExtractor={(item) => String(item.id)}
+          keyExtractor={paymentKeyExtractor}
           renderItem={renderPayment}
           contentContainerStyle={styles.listContent}
+          initialNumToRender={12}
+          maxToRenderPerBatch={12}
+          windowSize={9}
+          updateCellsBatchingPeriod={16}
+          removeClippedSubviews
           ListEmptyComponent={
             <Text style={styles.emptyText}>Nog geen betalingen geregistreerd.</Text>
           }

@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -37,13 +37,14 @@ export default function MonthDetailScreen() {
   const router = useRouter();
   const { colors, uiTheme } = useAppColors();
   const companies = useAppStore((s) => s.companies);
-  const styles = getStyles(colors);
+  const styles = useMemo(() => getStyles(colors), [colors]);
 
   const [year, month] = (id ?? '').split('-').map(Number);
   const [items, setItems] = useState<WorkEntry[]>([]);
   const [totalHours, setTotalHours] = useState(0);
   const [totalAmount, setTotalAmount] = useState(0);
   const [workedDays, setWorkedDays] = useState(0);
+  const showCompanyInTitle = companies.length > 1;
 
   const workedHours = totalHours / 60;
   const workedHoursLabel = totalHours === 60 ? 'Uur gewerkt' : 'Uren gewerkt';
@@ -52,24 +53,25 @@ export default function MonthDetailScreen() {
   useFocusEffect(
     useCallback(() => {
       if (!year || !month) return;
-      const entries = getWorkEntriesByMonth(year, month).sort((a, b) => {
-        const da = b.date.localeCompare(a.date);
-        if (da !== 0) return da;
-        return b.created_at.localeCompare(a.created_at);
-      });
+      const entries = getWorkEntriesByMonth(year, month);
+
+      let minutesTotal = 0;
+      let amountTotal = 0;
+      const uniqueDays = new Set<string>();
+      for (const entry of entries) {
+        minutesTotal += entry.duration_minutes;
+        amountTotal += entry.amount;
+        uniqueDays.add(entry.date);
+      }
 
       setItems(entries);
-      const hrs = entries.reduce((sum, e) => sum + e.duration_minutes, 0);
-      const amt = entries.reduce((sum, e) => sum + e.amount, 0);
-      const dayCount = new Set(entries.map((e) => e.date)).size;
-      setTotalHours(hrs);
-      setTotalAmount(amt);
-      setWorkedDays(dayCount);
+      setTotalHours(minutesTotal);
+      setTotalAmount(amountTotal);
+      setWorkedDays(uniqueDays.size);
     }, [year, month])
   );
 
-  const renderItem = ({ item }: { item: WorkEntry }) => {
-    const showCompanyInTitle = companies.length > 1;
+  const renderItem = useCallback(({ item }: { item: WorkEntry }) => {
     const companyName = item.company_name ?? 'Bedrijf';
     const title = showCompanyInTitle
       ? `${formatDisplayDate(item.date)} - ${companyName}`
@@ -108,7 +110,9 @@ export default function MonthDetailScreen() {
         </View>
       </TouchableOpacity>
     );
-  };
+  }, [colors.accentSecondary, router, showCompanyInTitle, styles, uiTheme]);
+
+  const keyExtractor = useCallback((item: WorkEntry) => String(item.id), []);
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -137,9 +141,14 @@ export default function MonthDetailScreen() {
 
       <FlatList
         data={items}
-        keyExtractor={(item) => String(item.id)}
+        keyExtractor={keyExtractor}
         renderItem={renderItem}
         contentContainerStyle={styles.listContent}
+        initialNumToRender={12}
+        maxToRenderPerBatch={12}
+        windowSize={9}
+        updateCellsBatchingPeriod={16}
+        removeClippedSubviews
         ListEmptyComponent={
           <Text style={styles.emptyText}>Geen registraties in deze maand.</Text>
         }

@@ -1,6 +1,60 @@
 import { getDb, Payment } from './schema';
-import { getAllUnpaidWorkEntries, updateWorkEntryPayment } from './work-entries';
-import { getAllUnpaidExpenses, updateExpensePayment } from './expenses';
+
+type FifoItem = {
+  id: number;
+  type: 'work' | 'expense';
+  amount: number;
+  amount_paid: number;
+};
+
+function getFifoItems(unpaidOnly: boolean): FifoItem[] {
+  const db = getDb();
+  const unpaidFilter = unpaidOnly ? 'AND amount_paid < amount' : '';
+  return db.getAllSync<FifoItem>(
+    `SELECT id, 'work' as type, amount, amount_paid, date, created_at,
+            start_time as sort_time, 0 as type_priority
+     FROM work_entries
+     WHERE deleted_at IS NULL ${unpaidFilter}
+     UNION ALL
+     SELECT id, 'expense' as type, amount, amount_paid, date, created_at,
+            '' as sort_time, 1 as type_priority
+     FROM expenses
+     WHERE deleted_at IS NULL ${unpaidFilter}
+     ORDER BY date ASC, created_at ASC, type_priority ASC, sort_time ASC, id ASC`
+  );
+}
+
+function applyAmountToItems(items: FifoItem[], amount: number): void {
+  const db = getDb();
+  let remaining = amount;
+
+  for (const item of items) {
+    if (remaining <= 0) break;
+
+    const outstanding = item.amount - item.amount_paid;
+    if (outstanding <= 0) continue;
+
+    const toPay = Math.min(outstanding, remaining);
+    const newAmountPaid = item.amount_paid + toPay;
+    const isFullyPaid = Math.abs(newAmountPaid - item.amount) < 0.001;
+
+    if (item.type === 'work') {
+      db.runSync('UPDATE work_entries SET amount_paid = ?, is_locked = ? WHERE id = ?', [
+        newAmountPaid,
+        isFullyPaid ? 1 : 0,
+        item.id,
+      ]);
+    } else {
+      db.runSync('UPDATE expenses SET amount_paid = ?, is_locked = ? WHERE id = ?', [
+        newAmountPaid,
+        isFullyPaid ? 1 : 0,
+        item.id,
+      ]);
+    }
+
+    remaining -= toPay;
+  }
+}
 
 export function getAllPayments(): Payment[] {
   const db = getDb();
@@ -24,22 +78,30 @@ export function deletePayment(id: number): void {
 }
 
 /**
-/**
  * Recalculates all payment applications from scratch.
- * Resets all work entries and expenses to unpaid, then re-applies all payments in chronological order.
+ * Resets all work entries and expenses to unpaid, then re-applies the total
+ * paid amount over all items in FIFO order.
  * Must be called after any payment is deleted or updated to keep amount_paid consistent.
  */
 export function recalculateAllPayments(): void {
   const db = getDb();
-  db.runSync('UPDATE work_entries SET amount_paid = 0, is_locked = 0 WHERE deleted_at IS NULL');
-  db.runSync('UPDATE expenses SET amount_paid = 0, is_locked = 0 WHERE deleted_at IS NULL');
+  db.execSync('BEGIN IMMEDIATE TRANSACTION');
+  try {
+    db.runSync('UPDATE work_entries SET amount_paid = 0, is_locked = 0 WHERE deleted_at IS NULL');
+    db.runSync('UPDATE expenses SET amount_paid = 0, is_locked = 0 WHERE deleted_at IS NULL');
 
-  const payments = db.getAllSync<Payment>(
-    'SELECT * FROM payments ORDER BY date ASC, created_at ASC'
-  );
+    const totalPaid = db.getFirstSync<{ total: number }>(
+      'SELECT COALESCE(SUM(amount), 0) as total FROM payments'
+    )?.total ?? 0;
 
-  for (const payment of payments) {
-    applyPayment(payment.amount);
+    if (totalPaid > 0) {
+      applyAmountToItems(getFifoItems(false), totalPaid);
+    }
+
+    db.execSync('COMMIT');
+  } catch (error) {
+    db.execSync('ROLLBACK');
+    throw error;
   }
 }
 
@@ -60,55 +122,16 @@ export function updatePayment(id: number, amount: number, note: string): void {
  * updating amount_paid and is_locked accordingly.
  */
 export function applyPayment(amount: number): void {
-  type UnpaidItem = {
-    id: number;
-    type: 'work' | 'expense';
-    date: string;
-    created_at: string;
-    amount: number;
-    amount_paid: number;
-  };
+  if (amount <= 0) return;
 
-  const workEntries = getAllUnpaidWorkEntries().map((e) => ({
-    id: e.id,
-    type: 'work' as const,
-    date: e.date,
-    created_at: e.created_at,
-    amount: e.amount,
-    amount_paid: e.amount_paid,
-  }));
-
-  const expenses = getAllUnpaidExpenses().map((e) => ({
-    id: e.id,
-    type: 'expense' as const,
-    date: e.date,
-    created_at: e.created_at,
-    amount: e.amount,
-    amount_paid: e.amount_paid,
-  }));
-
-  // Combine and sort by date ASC, then created_at ASC (FIFO)
-  const items: UnpaidItem[] = [...workEntries, ...expenses].sort((a, b) => {
-    if (a.date !== b.date) return a.date.localeCompare(b.date);
-    return a.created_at.localeCompare(b.created_at);
-  });
-
-  let remaining = amount;
-
-  for (const item of items) {
-    if (remaining <= 0) break;
-
-    const outstanding = item.amount - item.amount_paid;
-    const toPay = Math.min(outstanding, remaining);
-    const newAmountPaid = item.amount_paid + toPay;
-    const isFullyPaid = Math.abs(newAmountPaid - item.amount) < 0.001;
-    remaining -= toPay;
-
-    if (item.type === 'work') {
-      updateWorkEntryPayment(item.id, newAmountPaid, isFullyPaid ? 1 : 0);
-    } else {
-      updateExpensePayment(item.id, newAmountPaid, isFullyPaid ? 1 : 0);
-    }
+  const db = getDb();
+  db.execSync('BEGIN IMMEDIATE TRANSACTION');
+  try {
+    applyAmountToItems(getFifoItems(true), amount);
+    db.execSync('COMMIT');
+  } catch (error) {
+    db.execSync('ROLLBACK');
+    throw error;
   }
 }
 

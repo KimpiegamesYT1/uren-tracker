@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -23,19 +23,16 @@ type MonthSummary = { year: number; month: number; total_hours: number; total_am
 export default function MonthsScreen() {
   const router = useRouter();
   const { colors } = useAppColors();
-  const styles = getStyles(colors);
+  const styles = useMemo(() => getStyles(colors), [colors]);
   const [summaries, setSummaries] = useState<MonthSummary[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
 
   useFocusEffect(
     useCallback(() => {
-      setIsLoading(true);
       setSummaries(getMonthSummaries());
-      setIsLoading(false);
     }, [])
   );
 
-  const renderItem = ({ item }: { item: MonthSummary }) => (
+  const renderItem = useCallback(({ item }: { item: MonthSummary }) => (
     <TouchableOpacity
       style={styles.card}
       onPress={() => router.push(`/month/${item.year}-${String(item.month).padStart(2, '0')}`)}>
@@ -48,18 +45,25 @@ export default function MonthsScreen() {
         <Text style={styles.cardHours}>{item.total_hours.toFixed(1)}u</Text>
       </View>
     </TouchableOpacity>
-  );
+  ), [router, styles]);
+
+  const keyExtractor = useCallback((item: MonthSummary) => `${item.year}-${item.month}`, []);
 
   return (
     <SafeAreaView style={styles.container}>
       <Text style={styles.header}>Maandoverzicht</Text>
       <FlatList
         data={summaries}
-        keyExtractor={(item) => `${item.year}-${item.month}`}
+        keyExtractor={keyExtractor}
         renderItem={renderItem}
         contentContainerStyle={styles.listContent}
+        initialNumToRender={10}
+        maxToRenderPerBatch={10}
+        windowSize={7}
+        updateCellsBatchingPeriod={16}
+        removeClippedSubviews
         ListEmptyComponent={
-          isLoading ? null : <Text style={styles.emptyText}>Nog geen diensten geregistreerd.</Text>
+          <Text style={styles.emptyText}>Nog geen diensten geregistreerd.</Text>
         }
       />
     </SafeAreaView>

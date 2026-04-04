@@ -20,7 +20,7 @@ export function getWorkEntriesByMonth(year: number, month: number): WorkEntry[] 
      FROM work_entries we
      LEFT JOIN companies c ON we.company_id = c.id
      WHERE we.date LIKE ? AND we.deleted_at IS NULL
-     ORDER BY we.date ASC, we.start_time ASC`,
+     ORDER BY we.date DESC, we.created_at DESC`,
     [`${prefix}%`]
   );
 }

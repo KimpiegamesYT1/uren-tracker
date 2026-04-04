@@ -110,8 +110,15 @@ function ensureInitialized(db: SQLite.SQLiteDatabase): void {
 
     CREATE INDEX IF NOT EXISTS idx_work_entries_date ON work_entries(date);
     CREATE INDEX IF NOT EXISTS idx_work_entries_unpaid ON work_entries(amount_paid, amount);
+    CREATE INDEX IF NOT EXISTS idx_work_entries_active_date ON work_entries(deleted_at, date);
+    CREATE INDEX IF NOT EXISTS idx_work_entries_active_fifo ON work_entries(deleted_at, date, created_at);
+    CREATE INDEX IF NOT EXISTS idx_work_entries_active_unpaid ON work_entries(deleted_at, amount_paid, amount);
     CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date);
     CREATE INDEX IF NOT EXISTS idx_expenses_unpaid ON expenses(amount_paid, amount);
+    CREATE INDEX IF NOT EXISTS idx_expenses_active_date ON expenses(deleted_at, date);
+    CREATE INDEX IF NOT EXISTS idx_expenses_active_fifo ON expenses(deleted_at, date, created_at);
+    CREATE INDEX IF NOT EXISTS idx_expenses_active_unpaid ON expenses(deleted_at, amount_paid, amount);
+    CREATE INDEX IF NOT EXISTS idx_payments_date_created ON payments(date, created_at);
 
     INSERT OR IGNORE INTO settings (key, value) VALUES ('${SETTINGS_KEYS.roundingUnit}', '1');
     INSERT OR IGNORE INTO settings (key, value) VALUES ('${SETTINGS_KEYS.roundingDirection}', 'round');

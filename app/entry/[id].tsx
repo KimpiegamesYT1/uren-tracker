@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -30,9 +30,11 @@ import {
 export default function EntryScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { companies, settings, refreshBalance } = useAppStore();
+  const companies = useAppStore((s) => s.companies);
+  const settings = useAppStore((s) => s.settings);
+  const refreshBalance = useAppStore((s) => s.refreshBalance);
   const { colors } = useAppColors();
-  const styles = getStyles(colors);
+  const styles = useMemo(() => getStyles(colors), [colors]);
   const { show: showDialog, dialogNode } = useDialog();
 
   const [entry, setEntry] = useState<WorkEntry | null>(null);
