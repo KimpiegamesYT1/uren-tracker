@@ -19,11 +19,75 @@ import { getAllUnpaidWorkEntries } from '@/db/work-entries';
 import { getAllUnpaidExpenses } from '@/db/expenses';
 import { getAllPayments, insertPayment, applyPayment, deletePaymentAndRecalculate, updatePayment } from '@/db/payments';
 import { WorkEntry, Expense, Payment } from '@/db/schema';
-import { dateToDateString, formatDuration } from '@/utils/rounding';
+import { dateToDateString, dateStringToDate, formatDuration } from '@/utils/rounding';
 
 type UnpaidItem =
   | (WorkEntry & { itemType: 'work' })
   | (Expense & { itemType: 'expense' });
+
+const WEEKDAY_LABELS = ['Zo', 'Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za'];
+const MONTH_LABELS = [
+  'Januari',
+  'Februari',
+  'Maart',
+  'April',
+  'Mei',
+  'Juni',
+  'Juli',
+  'Augustus',
+  'September',
+  'Oktober',
+  'November',
+  'December',
+];
+
+function parseHexColor(hex: string): { r: number; g: number; b: number } | null {
+  const normalized = hex.trim();
+  const shorthand = /^#([\da-fA-F]{3})$/;
+  const full = /^#([\da-fA-F]{6})$/;
+
+  const shortMatch = normalized.match(shorthand);
+  if (shortMatch) {
+    const [r, g, b] = shortMatch[1].split('');
+    return {
+      r: parseInt(r + r, 16),
+      g: parseInt(g + g, 16),
+      b: parseInt(b + b, 16),
+    };
+  }
+
+  const fullMatch = normalized.match(full);
+  if (fullMatch) {
+    return {
+      r: parseInt(fullMatch[1].slice(0, 2), 16),
+      g: parseInt(fullMatch[1].slice(2, 4), 16),
+      b: parseInt(fullMatch[1].slice(4, 6), 16),
+    };
+  }
+
+  return null;
+}
+
+function blendGrayTint(baseHex: string, sourceHex?: string, ratio = 0.22): string {
+  const base = parseHexColor(baseHex);
+  const source = sourceHex ? parseHexColor(sourceHex) : null;
+
+  if (!base || !source) return baseHex;
+
+  const gray = Math.round((source.r + source.g + source.b) / 3);
+  const mix = (channel: number) => Math.round(channel * (1 - ratio) + gray * ratio);
+
+  return `rgb(${mix(base.r)}, ${mix(base.g)}, ${mix(base.b)})`;
+}
+
+function formatDisplayDate(date: string): string {
+  const parsed = dateStringToDate(date);
+  const weekday = WEEKDAY_LABELS[parsed.getDay()];
+  const day = parsed.getDate();
+  const month = MONTH_LABELS[parsed.getMonth()];
+  const year = parsed.getFullYear();
+  return `${weekday} ${day} ${month} ${year}`;
+}
 
 export default function BalanceScreen() {
   const router = useRouter();
@@ -46,9 +110,11 @@ export default function BalanceScreen() {
   const loadData = useCallback(() => {
     const workItems = getAllUnpaidWorkEntries().map((w) => ({ ...w, itemType: 'work' as const }));
     const expenseItems = getAllUnpaidExpenses().map((e) => ({ ...e, itemType: 'expense' as const }));
-    const combined: UnpaidItem[] = [...workItems, ...expenseItems].sort((a, b) =>
-      a.date.localeCompare(b.date)
-    );
+    const combined: UnpaidItem[] = [...workItems, ...expenseItems].sort((a, b) => {
+      const byDate = b.date.localeCompare(a.date);
+      if (byDate !== 0) return byDate;
+      return b.created_at.localeCompare(a.created_at);
+    });
     setUnpaidItems(combined);
     setPayments(getAllPayments());
     refreshBalance();
@@ -117,6 +183,15 @@ export default function BalanceScreen() {
   const renderUnpaidItem = ({ item }: { item: UnpaidItem }) => {
     const remaining = item.amount - item.amount_paid;
     const isPartial = item.amount_paid > 0;
+    const formattedDate = formatDisplayDate(item.date);
+    const isWork = item.itemType === 'work';
+    const companyName = item.company_name ?? (isWork ? 'Bedrijf' : 'Geen bedrijf');
+    const companyGrayBg =
+      item.itemType === 'expense' ? blendGrayTint(colors.surface, (item as Expense).company_color, 0.28) : colors.surface;
+    const companyGrayBar =
+      item.itemType === 'expense'
+        ? blendGrayTint(colors.surface, (item as Expense).company_color, 0.48)
+        : colors.accentSecondary;
 
     return (
       <TouchableOpacity
@@ -128,25 +203,30 @@ export default function BalanceScreen() {
             router.push(`/expense/${item.id}`);
           }
         }}>
-      <View style={styles.listItem}>
+      <View style={[styles.listItem, item.itemType === 'expense' && { backgroundColor: companyGrayBg }]}>
         <View
           style={[
             styles.listItemBar,
-            { backgroundColor: item.itemType === 'work' ? colors.accentSecondary : colors.info },
+            { backgroundColor: companyGrayBar },
           ]}
         />
         <View style={styles.listItemContent}>
           <View style={styles.listItemTopRow}>
             <Text style={styles.listItemTitle}>
-              {item.itemType === 'work'
-                ? `${(item as WorkEntry).company_name ?? 'Bedrijf'} · ${formatDuration((item as WorkEntry).duration_minutes)}`
-                : `${(item as Expense).company_name ?? 'Geen bedrijf'} · ${(item as Expense).description || 'Onkost'}`}
+              {formattedDate}
             </Text>
-            <Text style={styles.listItemAmount}>
-              {formatEuro(remaining)}
-            </Text>
+            <View style={styles.listItemAmountColumn}>
+              <Text style={styles.listItemAmount}>{formatEuro(remaining)}</Text>
+              {isWork ? (
+                <Text style={styles.listItemAmount}>{formatDuration((item as WorkEntry).duration_minutes)}</Text>
+              ) : null}
+            </View>
           </View>
-          <Text style={styles.listItemDate}>{item.date}</Text>
+          <Text style={styles.listItemDate}>
+            {item.itemType === 'expense'
+              ? `${companyName} · ${(item as Expense).description || 'Onkost'}`
+              : companyName}
+          </Text>
           {item.itemType === 'work' && (item as WorkEntry).note ? (
             <Text style={styles.listItemNote}>{(item as WorkEntry).note}</Text>
           ) : null}
@@ -174,7 +254,7 @@ export default function BalanceScreen() {
               {formatEuro(item.amount)}
             </Text>
           </View>
-          <Text style={styles.listItemDate}>{item.date}</Text>
+          <Text style={styles.listItemDate}>{formatDisplayDate(item.date)}</Text>
         </View>
       </View>
     </TouchableOpacity>
@@ -389,9 +469,14 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
   listItemContent: { flex: 1, padding: 12 },
   listItemTopRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: 10,
+  },
+  listItemAmountColumn: {
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    minWidth: 92,
   },
   listItemDate: { color: colors.textSecondary, fontSize: 12 },
   listItemNote: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
