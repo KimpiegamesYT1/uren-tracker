@@ -7,7 +7,6 @@
     "icon": "./assets/images/app-icon-appstore.png",
     "scheme": "urentracker",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true
     },
@@ -16,7 +15,6 @@
         "backgroundColor": "#121212",
         "foregroundImage": "./assets/images/app-icon-playstore.png"
       },
-      "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.CAMERA",
@@ -49,7 +47,11 @@
           "cameraPermission": "De app gebruikt de camera om bonfoto's te maken."
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-font",
+      "expo-image",
+      "expo-sharing",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,

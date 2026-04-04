@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -55,6 +55,7 @@ export default function HomeScreen() {
 
   const [dayEntries, setDayEntries] = useState<WorkEntry[]>([]);
   const [dayExpenses, setDayExpenses] = useState<Expense[]>([]);
+  const lastAutoSuggestedDateRef = useRef('');
 
   // Load entries for the selected date
   const loadDayData = useCallback(() => {
@@ -69,13 +70,16 @@ export default function HomeScreen() {
     }, [loadDayData])
   );
 
-  // Auto-suggest company when date changes
+  // Auto-suggest only when date changes; keep manual selection stable on the same date.
   useEffect(() => {
+    const dateKey = dateToDateString(selectedDate);
+
     if (companies.length === 1) {
       const onlyCompanyId = companies[0].id;
       if (selectedCompanyId !== onlyCompanyId) {
         setSelectedCompanyId(onlyCompanyId);
       }
+      lastAutoSuggestedDateRef.current = dateKey;
       return;
     }
 
@@ -84,10 +88,19 @@ export default function HomeScreen() {
       return;
     }
 
-    const suggested = suggestCompanyForDate(selectedDate);
-    if (suggested !== null) {
-      setSelectedCompanyId(suggested);
-    } else if (companies.length > 0 && selectedCompanyId === null) {
+    const isNewDate = lastAutoSuggestedDateRef.current !== dateKey;
+    if (isNewDate) {
+      lastAutoSuggestedDateRef.current = dateKey;
+      const suggested = suggestCompanyForDate(selectedDate);
+      if (suggested !== null && companies.some((c) => c.id === suggested)) {
+        if (selectedCompanyId !== suggested) {
+          setSelectedCompanyId(suggested);
+        }
+        return;
+      }
+    }
+
+    if (companies.length > 0 && selectedCompanyId === null) {
       setSelectedCompanyId(companies[0].id);
     }
   }, [selectedDate, companies, selectedCompanyId]);

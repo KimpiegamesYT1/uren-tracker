@@ -11,7 +11,7 @@ import {
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { formatEuro } from '@/constants/colors';
+import { formatEuro, getCompanyDisplayColor } from '@/constants/colors';
 import { useAppStore } from '@/store/use-app-store';
 import { useAppColors } from '@/hooks/use-app-colors';
 import { useDialog } from '@/components/ui/app-dialog';
@@ -91,8 +91,8 @@ function formatDisplayDate(date: string): string {
 
 export default function BalanceScreen() {
   const router = useRouter();
-  const { balance, refreshBalance } = useAppStore();
-  const { colors } = useAppColors();
+  const { balance, refreshBalance, companies } = useAppStore();
+  const { colors, uiTheme } = useAppColors();
   const styles = getStyles(colors);
   const { show: showDialog, dialogNode } = useDialog();
 
@@ -115,6 +115,7 @@ export default function BalanceScreen() {
       if (byDate !== 0) return byDate;
       return b.created_at.localeCompare(a.created_at);
     });
+
     setUnpaidItems(combined);
     setPayments(getAllPayments());
     refreshBalance();
@@ -185,13 +186,18 @@ export default function BalanceScreen() {
     const isPartial = item.amount_paid > 0;
     const formattedDate = formatDisplayDate(item.date);
     const isWork = item.itemType === 'work';
+    const showCompanyInTitle = companies.length > 1;
     const companyName = item.company_name ?? (isWork ? 'Bedrijf' : 'Geen bedrijf');
+    const companyColor = item.company_color
+      ? getCompanyDisplayColor(item.company_color, uiTheme)
+      : colors.accentSecondary;
+    const titleWithCompany = showCompanyInTitle ? `${formattedDate} - ${companyName}` : formattedDate;
     const companyGrayBg =
-      item.itemType === 'expense' ? blendGrayTint(colors.surface, (item as Expense).company_color, 0.28) : colors.surface;
+      item.itemType === 'expense' ? blendGrayTint(colors.surface, companyColor, 0.28) : colors.surface;
     const companyGrayBar =
       item.itemType === 'expense'
-        ? blendGrayTint(colors.surface, (item as Expense).company_color, 0.48)
-        : colors.accentSecondary;
+        ? blendGrayTint(companyColor, companyColor, 0.36)
+        : companyColor;
 
     return (
       <TouchableOpacity
@@ -213,22 +219,25 @@ export default function BalanceScreen() {
         <View style={styles.listItemContent}>
           <View style={styles.listItemTopRow}>
             <Text style={styles.listItemTitle}>
-              {formattedDate}
+              {titleWithCompany}
             </Text>
-            <View style={styles.listItemAmountColumn}>
-              <Text style={styles.listItemAmount}>{formatEuro(remaining)}</Text>
-              {isWork ? (
-                <Text style={styles.listItemAmount}>{formatDuration((item as WorkEntry).duration_minutes)}</Text>
-              ) : null}
-            </View>
+            <Text style={styles.listItemAmount}>{formatEuro(remaining)}</Text>
           </View>
-          <Text style={styles.listItemDate}>
-            {item.itemType === 'expense'
-              ? `${companyName} · ${(item as Expense).description || 'Onkost'}`
-              : companyName}
-          </Text>
-          {item.itemType === 'work' && (item as WorkEntry).note ? (
-            <Text style={styles.listItemNote}>{(item as WorkEntry).note}</Text>
+          {item.itemType === 'expense' ? (
+            <Text style={styles.listItemNote}>{(item as Expense).description || 'Onkost'}</Text>
+          ) : null}
+          {isWork ? (
+            <View style={styles.listItemBottomRow}>
+              <View style={styles.listItemBottomLeft}>
+                <Text style={styles.listItemTime}>
+                  {(item as WorkEntry).start_time} - {(item as WorkEntry).end_time}
+                </Text>
+                {(item as WorkEntry).note ? (
+                  <Text style={styles.listItemNote}>{(item as WorkEntry).note}</Text>
+                ) : null}
+              </View>
+              <Text style={styles.listItemHours}>{formatDuration((item as WorkEntry).duration_minutes)}</Text>
+            </View>
           ) : null}
           {isPartial && (
             <Text style={styles.listItemStatus}>
@@ -339,7 +348,7 @@ export default function BalanceScreen() {
               autoFocus
             />
             <Text style={styles.modalHint}>
-              De oudste openstaande posten worden automatisch afgestreept (FIFO).
+              De oudste openstaande posten worden automatisch afgestreept.
             </Text>
             <View style={styles.modalButtons}>
               <TouchableOpacity
@@ -469,20 +478,24 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
   listItemContent: { flex: 1, padding: 12 },
   listItemTopRow: {
     flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  listItemBottomRow: {
+    flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: 10,
   },
-  listItemAmountColumn: {
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-    minWidth: 92,
-  },
+  listItemBottomLeft: { flex: 1 },
+  listItemTime: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
   listItemDate: { color: colors.textSecondary, fontSize: 12 },
   listItemNote: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
   listItemTitle: { color: colors.textPrimary, fontWeight: '600', fontSize: 15, flex: 1 },
   listItemStatus: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
   listItemAmount: { color: colors.textPrimary, fontWeight: '700', fontSize: 16 },
+  listItemHours: { color: colors.textSecondary, fontWeight: '700', fontSize: 16 },
 
   emptyText: { color: colors.textSecondary, textAlign: 'center', marginTop: 40, fontSize: 15 },
 

@@ -44,8 +44,8 @@ export default function MonthsScreen() {
         <Text style={styles.cardYear}>{item.year}</Text>
       </View>
       <View style={styles.cardRight}>
-        <Text style={styles.cardHours}>{item.total_hours.toFixed(1)}u</Text>
         <Text style={styles.cardAmount}>{formatEuro(item.total_amount)}</Text>
+        <Text style={styles.cardHours}>{item.total_hours.toFixed(1)}u</Text>
       </View>
     </TouchableOpacity>
   );
