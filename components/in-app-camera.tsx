@@ -5,6 +5,8 @@ import {
   Text,
   TouchableOpacity,
   View,
+  Image,
+  ScrollView,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 
@@ -14,7 +16,7 @@ import { useDialog } from '@/components/ui/app-dialog';
 type InAppCameraProps = {
   visible: boolean;
   onClose: () => void;
-  onCapture: (uri: string) => Promise<void> | void;
+  onCapture: (uris: string[]) => Promise<void> | void;
 };
 
 export function InAppCamera({ visible, onClose, onCapture }: InAppCameraProps) {
@@ -24,17 +26,23 @@ export function InAppCamera({ visible, onClose, onCapture }: InAppCameraProps) {
   const cameraRef = useRef<CameraView | null>(null);
   const [isCapturing, setIsCapturing] = useState(false);
   const [isCameraReady, setIsCameraReady] = useState(false);
+  const [capturedUris, setCapturedUris] = useState<string[]>([]);
   const { show: showDialog, dialogNode } = useDialog();
 
   useEffect(() => {
     if (!visible) {
       setIsCameraReady(false);
       setIsCapturing(false);
+      setCapturedUris([]);
     }
   }, [visible]);
 
   const handleTakePhoto = async () => {
     if (!cameraRef.current || isCapturing || !isCameraReady) return;
+    if (capturedUris.length >= 5) {
+      showDialog({ title: 'Limiet bereikt', message: 'Je kunt maximaal 5 foto\'s toevoegen per onkost.' });
+      return;
+    }
 
     try {
       setIsCapturing(true);
@@ -43,17 +51,25 @@ export function InAppCamera({ visible, onClose, onCapture }: InAppCameraProps) {
         showDialog({ title: 'Fout', message: 'Foto maken is mislukt.' });
         return;
       }
-      try {
-        await onCapture(photo.uri);
-        onClose();
-      } catch {
-        showDialog({ title: 'Fout', message: 'Foto kon niet worden opgeslagen. Probeer het opnieuw.' });
-      }
+      setCapturedUris(prev => [...prev, photo.uri]);
     } catch {
       showDialog({ title: 'Fout', message: 'Foto maken is mislukt.' });
     } finally {
       setIsCapturing(false);
     }
+  };
+
+  const handleDone = async () => {
+    try {
+      await onCapture(capturedUris);
+      onClose();
+    } catch {
+      showDialog({ title: 'Fout', message: 'Kon foto\'s niet opslaan.' });
+    }
+  };
+
+  const removePhoto = (indexToRemove: number) => {
+    setCapturedUris(prev => prev.filter((_, i) => i !== indexToRemove));
   };
 
   const renderPermissionView = () => (
@@ -96,17 +112,43 @@ export function InAppCamera({ visible, onClose, onCapture }: InAppCameraProps) {
                 <Text style={styles.closeButtonText}>Sluiten</Text>
               </TouchableOpacity>
             </View>
+
+            {capturedUris.length > 0 && (
+              <View style={styles.previewStrip}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.previewStripContent}>
+                  {capturedUris.map((uri, index) => (
+                    <View key={index} style={styles.previewContainer}>
+                      <Image source={{ uri }} style={styles.previewImage} />
+                      <TouchableOpacity style={styles.previewRemoveBtn} onPress={() => removePhoto(index)}>
+                        <Text style={styles.previewRemoveText}>✕</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+
             <View style={styles.overlayBottom}>
               <TouchableOpacity
-                style={[styles.captureButton, (isCapturing || !isCameraReady) && styles.captureButtonDisabled]}
+                style={[styles.captureButton, (isCapturing || !isCameraReady || capturedUris.length >= 5) && styles.captureButtonDisabled]}
                 onPress={handleTakePhoto}
-                disabled={isCapturing || !isCameraReady}
-                accessibilityLabel={isCapturing ? 'Foto wordt opgeslagen' : 'Foto maken'}
+                disabled={isCapturing || !isCameraReady || capturedUris.length >= 5}
+                accessibilityLabel="Foto maken"
                 accessibilityRole="button">
                 <Text style={styles.captureButtonText}>
                   {isCapturing ? 'Opslaan...' : isCameraReady ? 'Foto maken' : 'Camera laden...'}
                 </Text>
               </TouchableOpacity>
+
+              {capturedUris.length > 0 && (
+                <TouchableOpacity
+                  style={styles.doneButton}
+                  onPress={handleDone}
+                  accessibilityLabel="Klaar"
+                  accessibilityRole="button">
+                  <Text style={styles.doneButtonText}>Klaar ({capturedUris.length})</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </>
         )}
@@ -161,8 +203,11 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
     left: 0,
     right: 0,
     padding: 24,
+    flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: colors.scrim,
+    gap: 16,
   },
   captureButton: {
     backgroundColor: colors.accentSecondary,
@@ -174,5 +219,52 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
     opacity: 0.6,
   },
   captureButtonText: { color: colors.onAccent, fontWeight: '700', fontSize: 16 },
+  doneButton: {
+    backgroundColor: colors.success,
+    borderRadius: 999,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+  },
+  doneButtonText: { color: colors.bg, fontWeight: '700', fontSize: 16 },
+  previewStrip: {
+    position: 'absolute',
+    bottom: 100, // Above overlayBottom
+    left: 0,
+    right: 0,
+    height: 80,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  previewStripContent: {
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    gap: 12,
+  },
+  previewContainer: {
+    position: 'relative',
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  previewImage: {
+    width: '100%',
+    height: '100%',
+  },
+  previewRemoveBtn: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: colors.error,
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewRemoveText: {
+    color: colors.bg,
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
 });
 }

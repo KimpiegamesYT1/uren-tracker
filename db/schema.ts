@@ -34,8 +34,17 @@ export type Expense = {
   description: string;
   amount: number;
   receipt_photo_uri: string | null;
+  receipt_uris: string[]; // Added
   amount_paid: number;
   is_locked: number; // 0 or 1
+  created_at: string;
+};
+
+export type ExpensePhoto = {
+  id: number;
+  expense_id: number;
+  photo_uri: string;
+  sort_order: number;
   created_at: string;
 };
 
@@ -108,6 +117,15 @@ function ensureInitialized(db: SQLite.SQLiteDatabase): void {
       value TEXT NOT NULL DEFAULT ''
     );
 
+    CREATE TABLE IF NOT EXISTS expense_receipt_photos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      expense_id INTEGER NOT NULL,
+      photo_uri TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (expense_id) REFERENCES expenses(id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_work_entries_date ON work_entries(date);
     CREATE INDEX IF NOT EXISTS idx_work_entries_unpaid ON work_entries(amount_paid, amount);
     CREATE INDEX IF NOT EXISTS idx_work_entries_active_date ON work_entries(deleted_at, date);
@@ -143,6 +161,21 @@ function ensureInitialized(db: SQLite.SQLiteDatabase): void {
     db.runSync('ALTER TABLE expenses ADD COLUMN deleted_at TEXT DEFAULT NULL');
   } catch {
     // Column already exists; ignore.
+  }
+
+  // Migration: multiple photos
+  try {
+    // We check if we need to backfill existing photos.
+    // If expense_receipt_photos is empty but there are expenses with receipt_photo_uri, insert them.
+    const photoCount = db.getFirstSync<{ count: number }>('SELECT COUNT(*) as count FROM expense_receipt_photos');
+    if (photoCount && photoCount.count === 0) {
+      db.runSync(`
+        INSERT INTO expense_receipt_photos (expense_id, photo_uri, sort_order)
+        SELECT id, receipt_photo_uri, 0 FROM expenses WHERE receipt_photo_uri IS NOT NULL
+      `);
+    }
+  } catch (e) {
+    console.error('Migration error for multiple photos:', e);
   }
 
   _isInitialized = true;

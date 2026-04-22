@@ -12,7 +12,6 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing from 'expo-sharing';
 
 import { getCompanyDisplayColor } from '@/constants/colors';
 import { useAppStore } from '@/store/use-app-store';
@@ -48,7 +47,7 @@ export default function ExpenseModalScreen() {
   const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(null);
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
-  const [receiptUri, setReceiptUri] = useState<string | null>(null);
+  const [receiptUris, setReceiptUris] = useState<string[]>([]);
   const [showCamera, setShowCamera] = useState(false);
 
   useEffect(() => {
@@ -92,40 +91,35 @@ export default function ExpenseModalScreen() {
       selectedCompanyId,
       description.trim(),
       parsedAmount,
-      receiptUri
+      receiptUris
     );
     refreshBalance();
     router.back();
   };
 
-  const handleCameraCapture = async (sourceUri: string) => {
+  const handleCameraCapture = async (sourceUris: string[]) => {
     await ensureReceiptsDir();
-    const fileName = `receipt_${Date.now()}.jpg`;
-    const destUri = `${RECEIPTS_DIR}${fileName}`;
-    try {
-      await FileSystem.copyAsync({ from: sourceUri, to: destUri });
-    } catch {
-      await FileSystem.moveAsync({ from: sourceUri, to: destUri });
+    const copiedUris: string[] = [];
+    for (const sourceUri of sourceUris) {
+      const fileName = `receipt_${Date.now()}_${Math.floor(Math.random() * 1000)}.jpg`;
+      const destUri = `${RECEIPTS_DIR}${fileName}`;
+      try {
+        await FileSystem.copyAsync({ from: sourceUri, to: destUri });
+      } catch {
+        await FileSystem.moveAsync({ from: sourceUri, to: destUri });
+      }
+      copiedUris.push(destUri);
     }
-    setReceiptUri(destUri);
-  };
-
-  const handleSharePhoto = async () => {
-    if (!receiptUri) return;
-    const canShare = await Sharing.isAvailableAsync();
-    if (!canShare) {
-      showDialog({ title: 'Niet beschikbaar', message: 'Delen is niet beschikbaar op dit apparaat.' });
-      return;
-    }
-    await Sharing.shareAsync(receiptUri, {
-      mimeType: 'image/jpeg',
-      dialogTitle: 'Deel bonfoto',
-    });
+    setReceiptUris(prev => [...prev, ...copiedUris].slice(0, 5));
   };
 
   const onDateChange = (_: DateTimePickerEvent, date?: Date) => {
     setShowDatePicker(false);
     if (date) setSelectedDate(date);
+  };
+
+  const handleRemovePhoto = (index: number) => {
+    setReceiptUris(prev => prev.filter((_, i) => i !== index));
   };
 
   return (
@@ -197,19 +191,20 @@ export default function ExpenseModalScreen() {
             onChangeText={setAmount}
           />
 
-          {receiptUri ? (
-            <View style={styles.receiptContainer}>
-              <Image source={{ uri: receiptUri }} style={styles.receiptImage} resizeMode="cover" />
-              <View style={styles.receiptActions}>
-                <TouchableOpacity onPress={handleSharePhoto} style={styles.shareBtn}>
-                  <Text style={styles.shareText}>Deel foto</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => setReceiptUri(null)} style={styles.removeBtn}>
-                  <Text style={styles.removeText}>Foto verwijderen</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          ) : (
+          {receiptUris.length > 0 && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
+              {receiptUris.map((uri, index) => (
+                <View key={index} style={styles.receiptContainer}>
+                  <Image source={{ uri }} style={styles.receiptImage} resizeMode="cover" />
+                  <TouchableOpacity onPress={() => handleRemovePhoto(index)} style={styles.removeBtn}>
+                    <Text style={styles.removeText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </ScrollView>
+          )}
+
+          {receiptUris.length < 5 && (
             <TouchableOpacity style={styles.photoButton} onPress={() => setShowCamera(true)}>
               <Text style={styles.photoButtonText}>Bonnetje fotograferen</Text>
             </TouchableOpacity>
@@ -298,13 +293,26 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
     },
     photoButtonText: { color: colors.textSecondary, fontSize: 15 },
 
-    receiptContainer: { gap: 8 },
-    receiptImage: { width: '100%', height: 200, borderRadius: 10 },
-    receiptActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-    shareBtn: { padding: 8 },
-    shareText: { color: colors.textSecondary, fontSize: 14, fontWeight: '600' },
-    removeBtn: { alignItems: 'center', padding: 8 },
-    removeText: { color: colors.error, fontSize: 14 },
+    receiptContainer: {
+      position: 'relative',
+      height: 120,
+      width: 120,
+      borderRadius: 16,
+      overflow: 'hidden',
+    },
+    receiptImage: { width: '100%', height: '100%' },
+    removeBtn: {
+      position: 'absolute',
+      top: 4,
+      right: 4,
+      backgroundColor: colors.scrim,
+      borderRadius: 12,
+      width: 24,
+      height: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    removeText: { color: colors.error, fontWeight: '700', fontSize: 14 },
 
     actionSection: { gap: 12, marginBottom: 4 },
     primaryButton: {

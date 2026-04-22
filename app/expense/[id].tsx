@@ -12,11 +12,10 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing from 'expo-sharing';
 
 import { getCompanyDisplayColor } from '@/constants/colors';
 import { useAppStore } from '@/store/use-app-store';
-import { insertExpense, updateExpense, deleteExpense, restoreExpense } from '@/db/expenses';
+import { insertExpense, updateExpense, deleteExpense, restoreExpense, getExpenseById } from '@/db/expenses';
 import { getAllCompanies } from '@/db/companies';
 import { getDb, Expense, Company } from '@/db/schema';
 import { dateToDateString, dateStringToDate } from '@/utils/rounding';
@@ -54,7 +53,7 @@ export default function ExpenseScreen() {
   const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(null);
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
-  const [receiptUri, setReceiptUri] = useState<string | null>(null);
+  const [receiptUris, setReceiptUris] = useState<string[]>([]);
   const [showCamera, setShowCamera] = useState(false);
   const [showUndoToast, setShowUndoToast] = useState(false);
 
@@ -66,8 +65,7 @@ export default function ExpenseScreen() {
     }
 
     if (!isNew) {
-      const db = getDb();
-      const expense = db.getFirstSync<Expense>('SELECT * FROM expenses WHERE id = ?', [Number(id)]);
+      const expense = getExpenseById(Number(id));
       if (expense) {
         setExistingExpense(expense);
         setIsLocked(expense.is_locked === 1);
@@ -75,7 +73,7 @@ export default function ExpenseScreen() {
         setDescription(expense.description);
         setAmount(String(expense.amount));
         setSelectedCompanyId(expense.company_id ?? (loaded[0]?.id ?? null));
-        setReceiptUri(expense.receipt_photo_uri);
+        setReceiptUris(expense.receipt_uris || (expense.receipt_photo_uri ? [expense.receipt_photo_uri] : []));
       }
     }
   }, [id, isNew]);
@@ -135,15 +133,17 @@ export default function ExpenseScreen() {
 
     try {
       if (isNew) {
-        insertExpense(dateStr, selectedCompanyId, description.trim(), parsedAmount, receiptUri);
+        insertExpense(dateStr, selectedCompanyId, description.trim(), parsedAmount, receiptUris);
       } else if (existingExpense) {
-        const oldPhoto = existingExpense.receipt_photo_uri;
-        if (oldPhoto && oldPhoto !== receiptUri) {
-          try {
-            await FileSystem.deleteAsync(oldPhoto, { idempotent: true });
-          } catch {}
+        const oldPhotos = existingExpense.receipt_uris || (existingExpense.receipt_photo_uri ? [existingExpense.receipt_photo_uri] : []);
+        for (const oldPhoto of oldPhotos) {
+          if (!receiptUris.includes(oldPhoto)) {
+            try {
+              await FileSystem.deleteAsync(oldPhoto, { idempotent: true });
+            } catch {}
+          }
         }
-        updateExpense(existingExpense.id, dateStr, selectedCompanyId, description.trim(), parsedAmount, receiptUri);
+        updateExpense(existingExpense.id, dateStr, selectedCompanyId, description.trim(), parsedAmount, receiptUris);
         // If was locked and now edited, reset lock so saldo recalculates on next payment
         if (isLocked) {
           const db = getDb();
@@ -173,37 +173,35 @@ export default function ExpenseScreen() {
 
   const handleToastDismiss = async () => {
     setShowUndoToast(false);
-    if (existingExpense?.receipt_photo_uri) {
-      try {
-        await FileSystem.deleteAsync(existingExpense.receipt_photo_uri, { idempotent: true });
-      } catch {}
+    if (existingExpense) {
+      const photos = existingExpense.receipt_uris || (existingExpense.receipt_photo_uri ? [existingExpense.receipt_photo_uri] : []);
+      for (const photo of photos) {
+        try {
+          await FileSystem.deleteAsync(photo, { idempotent: true });
+        } catch {}
+      }
     }
     router.back();
   };
 
-  const handleCameraCapture = async (sourceUri: string) => {
+  const handleCameraCapture = async (sourceUris: string[]) => {
     await ensureReceiptsDir();
-    const fileName = `receipt_${Date.now()}.jpg`;
-    const destUri = `${RECEIPTS_DIR}${fileName}`;
-    try {
-      await FileSystem.copyAsync({ from: sourceUri, to: destUri });
-    } catch {
-      await FileSystem.moveAsync({ from: sourceUri, to: destUri });
+    const copiedUris: string[] = [];
+    for (const sourceUri of sourceUris) {
+      const fileName = `receipt_${Date.now()}_${Math.floor(Math.random() * 1000)}.jpg`;
+      const destUri = `${RECEIPTS_DIR}${fileName}`;
+      try {
+        await FileSystem.copyAsync({ from: sourceUri, to: destUri });
+      } catch {
+        await FileSystem.moveAsync({ from: sourceUri, to: destUri });
+      }
+      copiedUris.push(destUri);
     }
-    setReceiptUri(destUri);
+    setReceiptUris(prev => [...prev, ...copiedUris].slice(0, 5));
   };
 
-  const handleSharePhoto = async () => {
-    if (!receiptUri) return;
-    const canShare = await Sharing.isAvailableAsync();
-    if (!canShare) {
-      showDialog({ title: 'Niet beschikbaar', message: 'Delen is niet beschikbaar op dit apparaat.' });
-      return;
-    }
-    await Sharing.shareAsync(receiptUri, {
-      mimeType: 'image/jpeg',
-      dialogTitle: 'Deel bonfoto',
-    });
+  const handleRemovePhoto = (index: number) => {
+    setReceiptUris(prev => prev.filter((_, i) => i !== index));
   };
 
   const onDateChange = (_: DateTimePickerEvent, date?: Date) => {
@@ -289,19 +287,20 @@ export default function ExpenseScreen() {
             onChangeText={setAmount}
           />
 
-          {receiptUri ? (
-            <View style={styles.receiptContainer}>
-              <Image source={{ uri: receiptUri }} style={styles.receiptImage} resizeMode="cover" />
-              <View style={styles.receiptActions}>
-                <TouchableOpacity style={styles.sharePhotoButton} onPress={handleSharePhoto}>
-                  <Text style={styles.sharePhotoText}>Deel foto</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.removePhotoButton} onPress={() => setReceiptUri(null)}>
-                  <Text style={styles.removePhotoText}>Foto verwijderen</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          ) : (
+          {receiptUris.length > 0 && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
+              {receiptUris.map((uri, index) => (
+                <View key={index} style={styles.receiptContainer}>
+                  <Image source={{ uri }} style={styles.receiptImage} resizeMode="cover" />
+                  <TouchableOpacity onPress={() => handleRemovePhoto(index)} style={styles.removePhotoButton}>
+                    <Text style={styles.removePhotoText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </ScrollView>
+          )}
+
+          {receiptUris.length < 5 && (
             <TouchableOpacity style={styles.photoButton} onPress={() => setShowCamera(true)}>
               <Text style={styles.photoButtonText}>Bonnetje fotograferen</Text>
             </TouchableOpacity>
@@ -401,13 +400,29 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
   },
   photoButtonText: { color: colors.textSecondary, fontSize: 15 },
 
-  receiptContainer: { gap: 8 },
-  receiptImage: { width: '100%', height: 200, borderRadius: 10 },
+  receiptContainer: {
+    position: 'relative',
+    height: 120,
+    width: 120,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  receiptImage: { width: '100%', height: '100%' },
   receiptActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   sharePhotoButton: { padding: 8 },
   sharePhotoText: { color: colors.textSecondary, fontSize: 14, fontWeight: '600' },
-  removePhotoButton: { alignItems: 'center', padding: 8 },
-  removePhotoText: { color: colors.error, fontSize: 14 },
+  removePhotoButton: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: colors.scrim,
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  removePhotoText: { color: colors.error, fontSize: 14, fontWeight: '700' },
 
   actionSection: { gap: 12, marginBottom: 4 },
   primaryButton: {
