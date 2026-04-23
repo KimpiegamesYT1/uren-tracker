@@ -13,7 +13,7 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#121212",
-        "foregroundImage": "./assets/images/app-icon-playstore.png"
+        "foregroundImage": "./assets/images/app-icon-android-foreground.png"
       },
       "predictiveBackGestureEnabled": false,
       "permissions": [
@@ -35,6 +35,12 @@
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff",
+          "android": {
+            "image": "./assets/images/splash-android-icon.png",
+            "imageWidth": 200,
+            "resizeMode": "contain",
+            "backgroundColor": "#33566A"
+          },
           "dark": {
             "backgroundColor": "#121212"
           }
