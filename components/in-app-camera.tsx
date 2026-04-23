@@ -17,9 +17,10 @@ type InAppCameraProps = {
   visible: boolean;
   onClose: () => void;
   onCapture: (uris: string[]) => Promise<void> | void;
+  initialUris?: string[];
 };
 
-export function InAppCamera({ visible, onClose, onCapture }: InAppCameraProps) {
+export function InAppCamera({ visible, onClose, onCapture, initialUris = [] }: InAppCameraProps) {
   const { colors } = useAppColors();
   const styles = getStyles(colors);
   const [permission, requestPermission] = useCameraPermissions();
@@ -30,12 +31,18 @@ export function InAppCamera({ visible, onClose, onCapture }: InAppCameraProps) {
   const { show: showDialog, dialogNode } = useDialog();
 
   useEffect(() => {
+    if (visible) {
+      setCapturedUris(initialUris.slice(0, 5));
+      setIsCapturing(false);
+      setIsCameraReady(false);
+      return;
+    }
+
     if (!visible) {
       setIsCameraReady(false);
       setIsCapturing(false);
-      setCapturedUris([]);
     }
-  }, [visible]);
+  }, [visible, initialUris]);
 
   const handleTakePhoto = async () => {
     if (!cameraRef.current || isCapturing || !isCameraReady) return;
@@ -129,26 +136,30 @@ export function InAppCamera({ visible, onClose, onCapture }: InAppCameraProps) {
             )}
 
             <View style={styles.overlayBottom}>
-              <TouchableOpacity
-                style={[styles.captureButton, (isCapturing || !isCameraReady || capturedUris.length >= 5) && styles.captureButtonDisabled]}
-                onPress={handleTakePhoto}
-                disabled={isCapturing || !isCameraReady || capturedUris.length >= 5}
-                accessibilityLabel="Foto maken"
-                accessibilityRole="button">
-                <Text style={styles.captureButtonText}>
-                  {isCapturing ? 'Opslaan...' : isCameraReady ? 'Foto maken' : 'Camera laden...'}
-                </Text>
-              </TouchableOpacity>
-
-              {capturedUris.length > 0 && (
+              <View style={styles.captureButtonCenter}>
                 <TouchableOpacity
-                  style={styles.doneButton}
-                  onPress={handleDone}
-                  accessibilityLabel="Klaar"
+                  style={[styles.captureButton, (isCapturing || !isCameraReady || capturedUris.length >= 5) && styles.captureButtonDisabled]}
+                  onPress={handleTakePhoto}
+                  disabled={isCapturing || !isCameraReady || capturedUris.length >= 5}
+                  accessibilityLabel="Foto maken"
                   accessibilityRole="button">
-                  <Text style={styles.doneButtonText}>Klaar ({capturedUris.length})</Text>
+                  <Text style={styles.captureButtonText}>
+                    {isCapturing ? 'Opslaan...' : isCameraReady ? 'Foto maken' : 'Camera laden...'}
+                  </Text>
                 </TouchableOpacity>
-              )}
+              </View>
+
+              <View style={styles.doneButtonSlot}>
+                {capturedUris.length > 0 && (
+                  <TouchableOpacity
+                    style={styles.doneButton}
+                    onPress={handleDone}
+                    accessibilityLabel="Klaar"
+                    accessibilityRole="button">
+                    <Text style={styles.doneButtonText}>Klaar ({capturedUris.length})</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
           </>
         )}
@@ -202,12 +213,26 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
     bottom: 0,
     left: 0,
     right: 0,
-    padding: 24,
-    flexDirection: 'row',
+    minHeight: 92,
+    paddingHorizontal: 16,
+    paddingVertical: 20,
     justifyContent: 'center',
-    alignItems: 'center',
     backgroundColor: colors.scrim,
-    gap: 16,
+  },
+  captureButtonCenter: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 20,
+    bottom: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  doneButtonSlot: {
+    alignSelf: 'stretch',
+    minHeight: 52,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
   },
   captureButton: {
     backgroundColor: colors.accentSecondary,

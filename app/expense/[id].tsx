@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useLayoutEffect } from 'react';
 import {
   View,
   Text,
@@ -7,11 +7,15 @@ import {
   ScrollView,
   StyleSheet,
   Image,
+  Modal,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+import * as ImageManipulator from 'expo-image-manipulator';
 
 import { getCompanyDisplayColor } from '@/constants/colors';
 import { useAppStore } from '@/store/use-app-store';
@@ -26,6 +30,22 @@ import { useDialog } from '@/components/ui/app-dialog';
 
 const RECEIPTS_DIR = `${FileSystem.documentDirectory}receipts/`;
 
+function capitalizeWords(value: string) {
+  return value
+    .split(' ')
+    .map((part) => (part ? part.charAt(0).toUpperCase() + part.slice(1) : part))
+    .join(' ');
+}
+
+function slugify(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
+}
+
 async function ensureReceiptsDir() {
   const info = await FileSystem.getInfoAsync(RECEIPTS_DIR);
   if (!info.exists) {
@@ -36,7 +56,9 @@ async function ensureReceiptsDir() {
 export default function ExpenseScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const navigation = useNavigation();
   const refreshBalance = useAppStore((s) => s.refreshBalance);
+  const userName = useAppStore((s) => s.settings.userName);
   const { colors, uiTheme } = useAppColors();
   const styles = useMemo(() => getStyles(colors), [colors]);
   const { show: showDialog, dialogNode } = useDialog();
@@ -55,6 +77,8 @@ export default function ExpenseScreen() {
   const [amount, setAmount] = useState('');
   const [receiptUris, setReceiptUris] = useState<string[]>([]);
   const [showCamera, setShowCamera] = useState(false);
+  const [previewUri, setPreviewUri] = useState<string | null>(null);
+  const [isSharingExpense, setIsSharingExpense] = useState(false);
   const [showUndoToast, setShowUndoToast] = useState(false);
 
   useEffect(() => {
@@ -186,23 +210,249 @@ export default function ExpenseScreen() {
 
   const handleCameraCapture = async (sourceUris: string[]) => {
     await ensureReceiptsDir();
-    const copiedUris: string[] = [];
-    for (const sourceUri of sourceUris) {
-      const fileName = `receipt_${Date.now()}_${Math.floor(Math.random() * 1000)}.jpg`;
-      const destUri = `${RECEIPTS_DIR}${fileName}`;
-      try {
-        await FileSystem.copyAsync({ from: sourceUri, to: destUri });
-      } catch {
-        await FileSystem.moveAsync({ from: sourceUri, to: destUri });
+    const nextUris: string[] = [];
+
+    for (const sourceUri of sourceUris.slice(0, 5)) {
+      let resolvedUri = sourceUri;
+      const alreadyStored = receiptUris.includes(sourceUri) || sourceUri.startsWith(RECEIPTS_DIR);
+
+      if (!alreadyStored) {
+        const fileName = `receipt_${Date.now()}_${Math.floor(Math.random() * 1000)}.jpg`;
+        const destUri = `${RECEIPTS_DIR}${fileName}`;
+        try {
+          await FileSystem.copyAsync({ from: sourceUri, to: destUri });
+        } catch {
+          await FileSystem.moveAsync({ from: sourceUri, to: destUri });
+        }
+        resolvedUri = destUri;
       }
-      copiedUris.push(destUri);
+
+      if (!nextUris.includes(resolvedUri)) {
+        nextUris.push(resolvedUri);
+      }
     }
-    setReceiptUris(prev => [...prev, ...copiedUris].slice(0, 5));
+
+    setReceiptUris(nextUris);
   };
 
   const handleRemovePhoto = (index: number) => {
     setReceiptUris(prev => prev.filter((_, i) => i !== index));
   };
+
+  const escapeHtml = (value: string) =>
+    value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+  const optimizePhotoForPdf = async (uri: string): Promise<string | null> => {
+    try {
+      const size = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+        Image.getSize(uri, (width, height) => resolve({ width, height }), reject);
+      });
+
+      const maxEdge = Math.max(size.width, size.height);
+      const resizeAction: ImageManipulator.Action[] = [];
+
+      if (maxEdge > 1600) {
+        if (size.width >= size.height) {
+          resizeAction.push({ resize: { width: 1600 } });
+        } else {
+          resizeAction.push({ resize: { height: 1600 } });
+        }
+      }
+
+      const optimized = await ImageManipulator.manipulateAsync(
+        uri,
+        resizeAction,
+        {
+          compress: 0.8,
+          format: ImageManipulator.SaveFormat.JPEG,
+          base64: true,
+        }
+      );
+
+      if (optimized.base64) {
+        try {
+          if (optimized.uri !== uri) {
+            await FileSystem.deleteAsync(optimized.uri, { idempotent: true });
+          }
+        } catch {}
+        return optimized.base64;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleShareExpense = useCallback(async () => {
+    if (isNew || isSharingExpense) return;
+
+    const canShare = await Sharing.isAvailableAsync();
+    if (!canShare) {
+      showDialog({ title: 'Niet beschikbaar', message: 'Delen is niet beschikbaar op dit apparaat.' });
+      return;
+    }
+
+    try {
+      setIsSharingExpense(true);
+
+      const companyName = companies.find((c) => c.id === selectedCompanyId)?.name ?? '-';
+      const fullDate = capitalizeWords(selectedDate.toLocaleDateString('nl-NL', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      }));
+      const parsedAmount = parseFloat(amount.replace(',', '.'));
+      const amountText = Number.isFinite(parsedAmount)
+        ? parsedAmount.toLocaleString('nl-NL', { style: 'currency', currency: 'EUR' })
+        : amount;
+
+      const photoHtmlBlocks: string[] = [];
+      for (const uri of receiptUris) {
+        const optimizedBase64 = await optimizePhotoForPdf(uri);
+        if (optimizedBase64) {
+          photoHtmlBlocks.push(`<img class="photo" src="data:image/jpeg;base64,${optimizedBase64}" />`);
+        } else {
+          photoHtmlBlocks.push('<p class="photo-fallback">Een foto kon niet geladen worden.</p>');
+        }
+      }
+
+      const html = `
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <style>
+              body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                padding: 24px;
+                color: #111;
+              }
+              .header {
+                border-bottom: 2px solid #111;
+                padding-bottom: 10px;
+                margin-bottom: 14px;
+              }
+              .title {
+                margin: 0;
+                font-size: 24px;
+                font-weight: 800;
+              }
+              .meta {
+                margin-bottom: 18px;
+              }
+              .row {
+                margin: 0 0 7px;
+                font-size: 14px;
+                line-height: 1.35;
+              }
+              .label {
+                font-weight: 700;
+              }
+              .photos {
+                margin-top: 14px;
+              }
+              .photo-wrap {
+                margin: 0 0 14px;
+                page-break-inside: avoid;
+              }
+              .photo {
+                display: block;
+                width: 100%;
+                max-width: 100%;
+                height: auto;
+                max-height: 700px;
+                object-fit: contain;
+                border: none;
+                border-radius: 0;
+              }
+              .photo-fallback {
+                font-size: 12px;
+                color: #777;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              <h1 class="title">Onkosten</h1>
+            </div>
+            <div class="meta">
+              <p class="row"><span class="label">Naam:</span> ${escapeHtml(userName || '-')}</p>
+              <p class="row"><span class="label">Beschrijving:</span> ${escapeHtml(description || '-')}</p>
+              <p class="row"><span class="label">Bedrag:</span> ${escapeHtml(amountText || '-')}</p>
+              <p class="row"><span class="label">Datum:</span> ${escapeHtml(fullDate)}</p>
+              <p class="row"><span class="label">Bedrijf:</span> ${escapeHtml(companyName)}</p>
+            </div>
+            <div class="photos">
+              ${photoHtmlBlocks.length > 0
+                ? photoHtmlBlocks.map((block) => `<div class="photo-wrap">${block}</div>`).join('')
+                : '<p>Geen bonfoto\'s toegevoegd.</p>'}
+            </div>
+          </body>
+        </html>
+      `;
+
+      const pdf = await Print.printToFileAsync({ html });
+      const datePart = selectedDate.toISOString().slice(0, 10);
+      const descriptionPart = slugify(description).slice(0, 24) || 'onkosten';
+      const shareFileName = `onkosten-${datePart}-${descriptionPart}.pdf`;
+      const targetUri = `${FileSystem.cacheDirectory}${shareFileName}`;
+
+      try {
+        await FileSystem.deleteAsync(targetUri, { idempotent: true });
+      } catch {}
+
+      let shareUri = pdf.uri;
+      try {
+        await FileSystem.copyAsync({ from: pdf.uri, to: targetUri });
+        shareUri = targetUri;
+      } catch {}
+
+      await Sharing.shareAsync(shareUri, {
+        mimeType: 'application/pdf',
+        dialogTitle: 'Deel onkosten',
+      });
+    } catch {
+      showDialog({ title: 'Fout', message: 'Kon de onkost niet delen.' });
+    } finally {
+      setIsSharingExpense(false);
+    }
+  }, [
+    isNew,
+    isSharingExpense,
+    showDialog,
+    companies,
+    userName,
+    selectedCompanyId,
+    amount,
+    receiptUris,
+    description,
+    selectedDate,
+  ]);
+
+  useLayoutEffect(() => {
+    if (isNew) {
+      navigation.setOptions({ headerRight: undefined });
+      return;
+    }
+
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity
+          style={[styles.headerShareButton, isSharingExpense && styles.headerShareButtonDisabled]}
+          onPress={() => void handleShareExpense()}
+          disabled={isSharingExpense}
+          accessibilityLabel="Delen"
+          accessibilityRole="button">
+          <Text style={styles.headerShareButtonText}>Delen</Text>
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation, isNew, isSharingExpense, handleShareExpense, styles]);
 
   const onDateChange = (_: DateTimePickerEvent, date?: Date) => {
     setShowDatePicker(false);
@@ -216,12 +466,12 @@ export default function ExpenseScreen() {
           <Text style={styles.headerTitle}>{isNew ? 'Onkost Toevoegen' : 'Onkost Bewerken'}</Text>
           <TouchableOpacity style={styles.dateSelector} onPress={() => setShowDatePicker(true)}>
             <Text style={styles.dateSelectorText}>
-              {selectedDate.toLocaleDateString('nl-NL', {
+              {capitalizeWords(selectedDate.toLocaleDateString('nl-NL', {
                 weekday: 'long',
                 day: 'numeric',
                 month: 'long',
                 year: 'numeric',
-              })}
+              }))}
             </Text>
             <Text style={styles.dateSelectorIcon}>▾</Text>
           </TouchableOpacity>
@@ -288,10 +538,16 @@ export default function ExpenseScreen() {
           />
 
           {receiptUris.length > 0 && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
+            <ScrollView
+              style={styles.receiptStrip}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.receiptStripContent}>
               {receiptUris.map((uri, index) => (
                 <View key={index} style={styles.receiptContainer}>
-                  <Image source={{ uri }} style={styles.receiptImage} resizeMode="cover" />
+                  <TouchableOpacity onPress={() => setPreviewUri(uri)} activeOpacity={0.9}>
+                    <Image source={{ uri }} style={styles.receiptImage} resizeMode="cover" />
+                  </TouchableOpacity>
                   <TouchableOpacity onPress={() => handleRemovePhoto(index)} style={styles.removePhotoButton}>
                     <Text style={styles.removePhotoText}>✕</Text>
                   </TouchableOpacity>
@@ -324,7 +580,16 @@ export default function ExpenseScreen() {
         visible={showCamera}
         onClose={() => setShowCamera(false)}
         onCapture={handleCameraCapture}
+        initialUris={receiptUris}
       />
+      <Modal visible={!!previewUri} transparent animationType="fade" onRequestClose={() => setPreviewUri(null)}>
+        <TouchableOpacity style={styles.previewModalBackdrop} activeOpacity={1} onPress={() => setPreviewUri(null)}>
+          {previewUri ? (
+            <Image source={{ uri: previewUri }} style={styles.previewModalImage} resizeMode="contain" />
+          ) : null}
+          <Text style={styles.previewModalHint}>Tik om te sluiten</Text>
+        </TouchableOpacity>
+      </Modal>
       <UndoToast
         visible={showUndoToast}
         message="Onkost verwijderd"
@@ -400,6 +665,15 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
   },
   photoButtonText: { color: colors.textSecondary, fontSize: 15 },
 
+  receiptStrip: {
+    marginTop: 12,
+  },
+  receiptStripContent: {
+    gap: 12,
+    paddingTop: 8,
+    paddingBottom: 2,
+  },
+
   receiptContainer: {
     position: 'relative',
     height: 120,
@@ -434,6 +708,20 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
   },
   primaryButtonText: { color: colors.onAccent, fontWeight: '700', fontSize: 16 },
 
+  headerShareButton: {
+    marginRight: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: colors.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerShareButtonDisabled: {
+    opacity: 0.6,
+  },
+  headerShareButtonText: { color: colors.onAccent, fontSize: 14, fontWeight: '700' },
+
   deleteButton: {
     borderWidth: 1,
     borderColor: colors.error,
@@ -442,5 +730,20 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
     alignItems: 'center',
   },
   deleteButtonText: { color: colors.error, fontWeight: '600', fontSize: 15 },
+
+  previewModalBackdrop: {
+    flex: 1,
+    backgroundColor: colors.scrim,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    gap: 12,
+  },
+  previewModalImage: {
+    width: '100%',
+    height: '85%',
+    borderRadius: 12,
+  },
+  previewModalHint: { color: colors.textPrimary, fontSize: 14, fontWeight: '600' },
 });
 }

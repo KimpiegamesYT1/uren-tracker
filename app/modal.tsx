@@ -25,6 +25,13 @@ import { useDialog } from '@/components/ui/app-dialog';
 
 const RECEIPTS_DIR = `${FileSystem.documentDirectory}receipts/`;
 
+function capitalizeWords(value: string) {
+  return value
+    .split(' ')
+    .map((part) => (part ? part.charAt(0).toUpperCase() + part.slice(1) : part))
+    .join(' ');
+}
+
 async function ensureReceiptsDir() {
   const info = await FileSystem.getInfoAsync(RECEIPTS_DIR);
   if (!info.exists) {
@@ -99,18 +106,29 @@ export default function ExpenseModalScreen() {
 
   const handleCameraCapture = async (sourceUris: string[]) => {
     await ensureReceiptsDir();
-    const copiedUris: string[] = [];
-    for (const sourceUri of sourceUris) {
-      const fileName = `receipt_${Date.now()}_${Math.floor(Math.random() * 1000)}.jpg`;
-      const destUri = `${RECEIPTS_DIR}${fileName}`;
-      try {
-        await FileSystem.copyAsync({ from: sourceUri, to: destUri });
-      } catch {
-        await FileSystem.moveAsync({ from: sourceUri, to: destUri });
+    const nextUris: string[] = [];
+
+    for (const sourceUri of sourceUris.slice(0, 5)) {
+      let resolvedUri = sourceUri;
+      const alreadyStored = receiptUris.includes(sourceUri) || sourceUri.startsWith(RECEIPTS_DIR);
+
+      if (!alreadyStored) {
+        const fileName = `receipt_${Date.now()}_${Math.floor(Math.random() * 1000)}.jpg`;
+        const destUri = `${RECEIPTS_DIR}${fileName}`;
+        try {
+          await FileSystem.copyAsync({ from: sourceUri, to: destUri });
+        } catch {
+          await FileSystem.moveAsync({ from: sourceUri, to: destUri });
+        }
+        resolvedUri = destUri;
       }
-      copiedUris.push(destUri);
+
+      if (!nextUris.includes(resolvedUri)) {
+        nextUris.push(resolvedUri);
+      }
     }
-    setReceiptUris(prev => [...prev, ...copiedUris].slice(0, 5));
+
+    setReceiptUris(nextUris);
   };
 
   const onDateChange = (_: DateTimePickerEvent, date?: Date) => {
@@ -129,7 +147,7 @@ export default function ExpenseModalScreen() {
           <Text style={styles.headerTitle}>Onkost Toevoegen</Text>
           <TouchableOpacity style={styles.dateSelector} onPress={() => setShowDatePicker(true)}>
             <Text style={styles.dateSelectorText}>
-              {selectedDate.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' })}
+              {capitalizeWords(selectedDate.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' }))}
             </Text>
             <Text style={styles.dateSelectorIcon}>▾</Text>
           </TouchableOpacity>
@@ -192,7 +210,11 @@ export default function ExpenseModalScreen() {
           />
 
           {receiptUris.length > 0 && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
+            <ScrollView
+              style={styles.receiptStrip}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.receiptStripContent}>
               {receiptUris.map((uri, index) => (
                 <View key={index} style={styles.receiptContainer}>
                   <Image source={{ uri }} style={styles.receiptImage} resizeMode="cover" />
@@ -226,6 +248,7 @@ export default function ExpenseModalScreen() {
         visible={showCamera}
         onClose={() => setShowCamera(false)}
         onCapture={handleCameraCapture}
+        initialUris={receiptUris}
       />
       {dialogNode}
     </SafeAreaView>
@@ -292,6 +315,15 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
       alignItems: 'center',
     },
     photoButtonText: { color: colors.textSecondary, fontSize: 15 },
+
+    receiptStrip: {
+      marginTop: 12,
+    },
+    receiptStripContent: {
+      gap: 12,
+      paddingTop: 8,
+      paddingBottom: 2,
+    },
 
     receiptContainer: {
       position: 'relative',
