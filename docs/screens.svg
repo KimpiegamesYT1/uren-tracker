@@ -1,0 +1,157 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 760" width="1280" height="760" role="img" aria-label="Uren Tracker schermen: Uren registreren, Saldo, Maandoverzicht" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <defs>
+    <radialGradient id="s-glow" cx="0.5" cy="0" r="0.9">
+      <stop offset="0" stop-color="#90CAF9" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#90CAF9" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1280" height="760" fill="#0D0D0D"/>
+  <rect width="1280" height="760" fill="url(#s-glow)"/>
+
+  <!-- ============ PHONE 1 : Uren registreren ============ -->
+  <svg x="40" y="20" width="372" height="720" viewBox="0 0 372 720">
+    <rect x="0.75" y="0.75" width="370.5" height="718.5" rx="42" fill="#0A0A0A" stroke="#2A2A2A" stroke-width="1.5"/>
+    <rect x="9" y="9" width="354" height="702" rx="34" fill="#121212"/>
+    <text x="26" y="36" fill="#C9C9C9" font-size="13" font-weight="600">16:08</text>
+    <g fill="#C9C9C9"><rect x="300" y="26" width="16" height="9" rx="2"/><rect x="322" y="24" width="24" height="13" rx="3" fill="none" stroke="#C9C9C9" stroke-width="1.4"/><rect x="324.5" y="26.5" width="16" height="8" rx="1.5"/></g>
+
+    <text x="26" y="86" fill="#E6E6E6" font-size="21" font-weight="800">Uren registreren</text>
+    <text x="26" y="112" fill="#90CAF9" font-size="14" font-weight="600">Vandaag</text>
+    <text x="97" y="112" fill="#90CAF9" font-size="10">&#9662;</text>
+
+    <text x="26" y="150" fill="#6E6E6E" font-size="10" font-weight="700" letter-spacing="1.4">BEDRIJF</text>
+    <rect x="26" y="160" width="94" height="32" rx="16" fill="#F28B82"/>
+    <text x="73" y="181" fill="#121212" font-size="13" font-weight="700" text-anchor="middle">Bedrijf A</text>
+    <rect x="128" y="160" width="94" height="32" rx="16" fill="#1D1D1D" stroke="#2C2C2C"/>
+    <text x="175" y="181" fill="#B0B0B0" font-size="13" font-weight="600" text-anchor="middle">Bedrijf B</text>
+
+    <rect x="20" y="210" width="332" height="150" rx="20" fill="#1D1D1D"/>
+    <text x="66" y="248" fill="#6E6E6E" font-size="10" font-weight="700" letter-spacing="0.5" text-anchor="middle">START</text>
+    <text x="66" y="284" fill="#E6E6E6" font-size="27" font-weight="700" text-anchor="middle">09:00</text>
+    <text x="186" y="276" fill="#5B5B5B" font-size="18" text-anchor="middle">&#8594;</text>
+    <text x="300" y="248" fill="#6E6E6E" font-size="10" font-weight="700" letter-spacing="0.5" text-anchor="middle">EIND</text>
+    <text x="300" y="284" fill="#E6E6E6" font-size="27" font-weight="700" text-anchor="middle">16:00</text>
+    <line x1="44" y1="312" x2="328" y2="312" stroke="#2E2E2E" stroke-width="1"/>
+    <text x="186" y="340" font-size="15" text-anchor="middle"><tspan fill="#9A9A9A" font-weight="500">7u &#183; </tspan><tspan fill="#E6E6E6" font-weight="700">&#8364; 73,50</tspan></text>
+
+    <rect x="20" y="378" width="332" height="50" rx="12" fill="#202020"/>
+    <text x="38" y="408" fill="#6E6E6E" font-size="14">Opmerking toevoegen&#8230;</text>
+
+    <rect x="20" y="444" width="332" height="52" rx="16" fill="#90CAF9"/>
+    <text x="186" y="476" fill="#121212" font-size="15" font-weight="700" text-anchor="middle">Dienst opslaan</text>
+    <text x="186" y="524" fill="#90CAF9" font-size="13" font-weight="600" text-anchor="middle">+ Onkost toevoegen</text>
+
+    <!-- tab bar -->
+    <line x1="16" y1="652" x2="356" y2="652" stroke="#232323" stroke-width="1"/>
+    <g text-anchor="middle" font-size="9.5" font-weight="600">
+      <g transform="translate(66 678)" stroke="#90CAF9" fill="none" stroke-width="1.6" stroke-linejoin="round"><path d="M-8 1 L0 -7 L8 1"/><path d="M-6 0 V9 H6 V0"/></g>
+      <text x="66" y="702" fill="#90CAF9">Uren</text>
+      <g transform="translate(152 678)" stroke="#6E6E6E" fill="none" stroke-width="1.6"><rect x="-9" y="-6" width="18" height="13" rx="2"/><line x1="-9" y1="-1" x2="9" y2="-1"/></g>
+      <text x="152" y="702" fill="#6E6E6E">Saldo</text>
+      <g transform="translate(238 678)" stroke="#6E6E6E" fill="none" stroke-width="1.6"><rect x="-8" y="-6" width="16" height="15" rx="2"/><line x1="-8" y1="-1" x2="8" y2="-1"/><line x1="-3" y1="-9" x2="-3" y2="-4"/><line x1="3" y1="-9" x2="3" y2="-4"/></g>
+      <text x="238" y="702" fill="#6E6E6E">Maanden</text>
+      <g transform="translate(322 678)" stroke="#6E6E6E" fill="none" stroke-width="1.6"><circle cx="0" cy="1" r="3.4"/><circle cx="0" cy="1" r="8"/></g>
+      <text x="322" y="702" fill="#6E6E6E">Instellingen</text>
+    </g>
+  </svg>
+
+  <!-- ============ PHONE 2 : Saldo ============ -->
+  <svg x="454" y="20" width="372" height="720" viewBox="0 0 372 720">
+    <rect x="0.75" y="0.75" width="370.5" height="718.5" rx="42" fill="#0A0A0A" stroke="#2A2A2A" stroke-width="1.5"/>
+    <rect x="9" y="9" width="354" height="702" rx="34" fill="#121212"/>
+    <text x="26" y="36" fill="#C9C9C9" font-size="13" font-weight="600">16:08</text>
+    <g fill="#C9C9C9"><rect x="300" y="26" width="16" height="9" rx="2"/><rect x="322" y="24" width="24" height="13" rx="3" fill="none" stroke="#C9C9C9" stroke-width="1.4"/><rect x="324.5" y="26.5" width="16" height="8" rx="1.5"/></g>
+
+    <rect x="14" y="58" width="344" height="158" rx="18" fill="#1D1D1D"/>
+    <text x="186" y="92" fill="#9A9A9A" font-size="10.5" font-weight="700" letter-spacing="1.4" text-anchor="middle">NOG TE ONTVANGEN</text>
+    <text x="186" y="140" fill="#EDEDED" font-size="36" font-weight="800" letter-spacing="-1" text-anchor="middle">&#8364; 165,38</text>
+    <rect x="106" y="162" width="160" height="40" rx="10" fill="#90CAF9"/>
+    <text x="186" y="187" fill="#121212" font-size="13.5" font-weight="700" text-anchor="middle">Betaling ontvangen</text>
+
+    <text x="96" y="252" fill="#90CAF9" font-size="13" font-weight="700" text-anchor="middle">Openstaand (2)</text>
+    <line x1="40" y1="264" x2="152" y2="264" stroke="#90CAF9" stroke-width="2"/>
+    <text x="270" y="252" fill="#7E7E7E" font-size="13" text-anchor="middle">Betalingen (11)</text>
+
+    <!-- row 1 -->
+    <rect x="14" y="284" width="344" height="76" rx="12" fill="#1A1A1A"/>
+    <rect x="14" y="284" width="4" height="76" rx="2" fill="#F28B82"/>
+    <text x="30" y="312" fill="#E2E2E2" font-size="13.5" font-weight="600">Za 5 sep 2026 &#183; Bedrijf A</text>
+    <text x="30" y="336" fill="#8A8A8A" font-size="11.5">09:00 &#8211; 16:00</text>
+    <text x="344" y="312" fill="#E2E2E2" font-size="15" font-weight="700" text-anchor="end">&#8364; 73,50</text>
+    <text x="344" y="338" fill="#8A8A8A" font-size="13" font-weight="700" text-anchor="end">7u</text>
+
+    <!-- row 2 -->
+    <rect x="14" y="372" width="344" height="76" rx="12" fill="#1A1A1A"/>
+    <rect x="14" y="372" width="4" height="76" rx="2" fill="#F28B82"/>
+    <text x="30" y="400" fill="#E2E2E2" font-size="13.5" font-weight="600">Do 3 sep 2026 &#183; Bedrijf A</text>
+    <text x="30" y="424" fill="#8A8A8A" font-size="11.5">08:15 &#8211; 17:00</text>
+    <text x="344" y="400" fill="#E2E2E2" font-size="15" font-weight="700" text-anchor="end">&#8364; 91,88</text>
+    <text x="344" y="426" fill="#8A8A8A" font-size="13" font-weight="700" text-anchor="end">8u 45m</text>
+
+    <line x1="16" y1="652" x2="356" y2="652" stroke="#232323" stroke-width="1"/>
+    <g text-anchor="middle" font-size="9.5" font-weight="600">
+      <g transform="translate(66 678)" stroke="#6E6E6E" fill="none" stroke-width="1.6" stroke-linejoin="round"><path d="M-8 1 L0 -7 L8 1"/><path d="M-6 0 V9 H6 V0"/></g>
+      <text x="66" y="702" fill="#6E6E6E">Uren</text>
+      <g transform="translate(152 678)" stroke="#90CAF9" fill="none" stroke-width="1.6"><rect x="-9" y="-6" width="18" height="13" rx="2"/><line x1="-9" y1="-1" x2="9" y2="-1"/></g>
+      <text x="152" y="702" fill="#90CAF9">Saldo</text>
+      <g transform="translate(238 678)" stroke="#6E6E6E" fill="none" stroke-width="1.6"><rect x="-8" y="-6" width="16" height="15" rx="2"/><line x1="-8" y1="-1" x2="8" y2="-1"/><line x1="-3" y1="-9" x2="-3" y2="-4"/><line x1="3" y1="-9" x2="3" y2="-4"/></g>
+      <text x="238" y="702" fill="#6E6E6E">Maanden</text>
+      <g transform="translate(322 678)" stroke="#6E6E6E" fill="none" stroke-width="1.6"><circle cx="0" cy="1" r="3.4"/><circle cx="0" cy="1" r="8"/></g>
+      <text x="322" y="702" fill="#6E6E6E">Instellingen</text>
+    </g>
+  </svg>
+
+  <!-- ============ PHONE 3 : Maandoverzicht ============ -->
+  <svg x="868" y="20" width="372" height="720" viewBox="0 0 372 720">
+    <rect x="0.75" y="0.75" width="370.5" height="718.5" rx="42" fill="#0A0A0A" stroke="#2A2A2A" stroke-width="1.5"/>
+    <rect x="9" y="9" width="354" height="702" rx="34" fill="#121212"/>
+    <text x="26" y="36" fill="#C9C9C9" font-size="13" font-weight="600">16:08</text>
+    <g fill="#C9C9C9"><rect x="300" y="26" width="16" height="9" rx="2"/><rect x="322" y="24" width="24" height="13" rx="3" fill="none" stroke="#C9C9C9" stroke-width="1.4"/><rect x="324.5" y="26.5" width="16" height="8" rx="1.5"/></g>
+
+    <text x="26" y="88" fill="#E6E6E6" font-size="22" font-weight="800">Maandoverzicht</text>
+
+    <g>
+      <rect x="14" y="112" width="344" height="66" rx="12" fill="#1A1A1A"/>
+      <text x="30" y="142" fill="#E6E6E6" font-size="16" font-weight="700">September</text>
+      <text x="30" y="162" fill="#8A8A8A" font-size="12">2026</text>
+      <text x="344" y="142" fill="#E6E6E6" font-size="16" font-weight="700" text-anchor="end">&#8364; 165,38</text>
+      <text x="344" y="162" fill="#8A8A8A" font-size="12" text-anchor="end">15u 45m</text>
+
+      <rect x="14" y="190" width="344" height="66" rx="12" fill="#1A1A1A"/>
+      <text x="30" y="220" fill="#E6E6E6" font-size="16" font-weight="700">Augustus</text>
+      <text x="30" y="240" fill="#8A8A8A" font-size="12">2026</text>
+      <text x="344" y="220" fill="#E6E6E6" font-size="16" font-weight="700" text-anchor="end">&#8364; 252,00</text>
+      <text x="344" y="240" fill="#8A8A8A" font-size="12" text-anchor="end">28u</text>
+
+      <rect x="14" y="268" width="344" height="66" rx="12" fill="#1A1A1A"/>
+      <text x="30" y="298" fill="#E6E6E6" font-size="16" font-weight="700">Juli</text>
+      <text x="30" y="318" fill="#8A8A8A" font-size="12">2026</text>
+      <text x="344" y="298" fill="#E6E6E6" font-size="16" font-weight="700" text-anchor="end">&#8364; 562,50</text>
+      <text x="344" y="318" fill="#8A8A8A" font-size="12" text-anchor="end">62u 30m</text>
+
+      <rect x="14" y="346" width="344" height="66" rx="12" fill="#1A1A1A"/>
+      <text x="30" y="376" fill="#E6E6E6" font-size="16" font-weight="700">Juni</text>
+      <text x="30" y="396" fill="#8A8A8A" font-size="12">2026</text>
+      <text x="344" y="376" fill="#E6E6E6" font-size="16" font-weight="700" text-anchor="end">&#8364; 445,50</text>
+      <text x="344" y="396" fill="#8A8A8A" font-size="12" text-anchor="end">49u 30m</text>
+
+      <rect x="14" y="424" width="344" height="66" rx="12" fill="#1A1A1A"/>
+      <text x="30" y="454" fill="#E6E6E6" font-size="16" font-weight="700">Mei</text>
+      <text x="30" y="474" fill="#8A8A8A" font-size="12">2026</text>
+      <text x="344" y="454" fill="#E6E6E6" font-size="16" font-weight="700" text-anchor="end">&#8364; 252,00</text>
+      <text x="344" y="474" fill="#8A8A8A" font-size="12" text-anchor="end">28u</text>
+    </g>
+
+    <line x1="16" y1="652" x2="356" y2="652" stroke="#232323" stroke-width="1"/>
+    <g text-anchor="middle" font-size="9.5" font-weight="600">
+      <g transform="translate(66 678)" stroke="#6E6E6E" fill="none" stroke-width="1.6" stroke-linejoin="round"><path d="M-8 1 L0 -7 L8 1"/><path d="M-6 0 V9 H6 V0"/></g>
+      <text x="66" y="702" fill="#6E6E6E">Uren</text>
+      <g transform="translate(152 678)" stroke="#6E6E6E" fill="none" stroke-width="1.6"><rect x="-9" y="-6" width="18" height="13" rx="2"/><line x1="-9" y1="-1" x2="9" y2="-1"/></g>
+      <text x="152" y="702" fill="#6E6E6E">Saldo</text>
+      <g transform="translate(238 678)" stroke="#90CAF9" fill="none" stroke-width="1.6"><rect x="-8" y="-6" width="16" height="15" rx="2"/><line x1="-8" y1="-1" x2="8" y2="-1"/><line x1="-3" y1="-9" x2="-3" y2="-4"/><line x1="3" y1="-9" x2="3" y2="-4"/></g>
+      <text x="238" y="702" fill="#90CAF9">Maanden</text>
+      <g transform="translate(322 678)" stroke="#6E6E6E" fill="none" stroke-width="1.6"><circle cx="0" cy="1" r="3.4"/><circle cx="0" cy="1" r="8"/></g>
+      <text x="322" y="702" fill="#6E6E6E">Instellingen</text>
+    </g>
+  </svg>
+</svg>
