@@ -1,34 +1,33 @@
-name: Node.js CI
+name: CI
 
 on:
   push:
-    branches: [ "master" ]
   pull_request:
-    branches: [ "master" ]
+  workflow_dispatch:
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
 
-    strategy:
-      matrix:
-        node-version: [22.x]  # Expo heeft geen voordeel bij meerdere Node versies testen
-
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ matrix.node-version }}
-        cache: 'npm'
+      - name: Use Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
 
-    - run: npm ci
+      - run: npm ci
 
-    - run: npm run build --if-present
+      - name: Expo Doctor
+        run: npx expo-doctor@latest
 
-    - name: Expo Doctor
-      run: npx expo-doctor@latest
+      - name: TypeScript check
+        run: npx tsc --noEmit
 
-    - name: TypeScript check
-      run: npx tsc --noEmit
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
