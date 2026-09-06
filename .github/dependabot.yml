@@ -6,11 +6,29 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
-    # One bundled PR for version updates, one for security updates, instead of
-    # a separate PR per package.
+    # Expo owns the versions of these packages. They must only change through
+    # `expo install` / an SDK upgrade, otherwise `expo-doctor` fails. Dependabot
+    # must not touch them.
+    ignore:
+      - dependency-name: "expo"
+      - dependency-name: "expo-*"
+      - dependency-name: "react"
+      - dependency-name: "react-dom"
+      - dependency-name: "react-native"
+      - dependency-name: "react-native-*"
+      - dependency-name: "@react-native-community/*"
+      - dependency-name: "@react-navigation/*"
+      - dependency-name: "@types/react"
+    # One bundled PR for the remaining safe (minor + patch) version updates,
+    # one for security updates. Major bumps of the leftover dev tooling
+    # (typescript, eslint, jest, lint-staged, ...) still arrive as their own
+    # PRs so they can be reviewed one at a time.
     groups:
       npm-version-updates:
         applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
         patterns:
           - "*"
       npm-security-updates:
