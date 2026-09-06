@@ -10,36 +10,41 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { formatEuro } from '@/constants/colors';
 import { useAppStore } from '@/store/use-app-store';
 import { updateWorkEntry, deleteWorkEntry, restoreWorkEntry } from '@/db/work-entries';
-import { getDb, WorkEntry } from '@/db/schema';
+import { getCompanyById } from '@/db/companies';
+import { getDb, WorkEntry, Company } from '@/db/schema';
 import { useAppColors } from '@/hooks/use-app-colors';
-import { UndoToast } from '@/components/undo-toast';
 import { useDialog } from '@/components/ui/app-dialog';
-import {
-  roundMinutes,
-  calcRawDuration,
-  dateToTimeString,
-  dateToDateString,
-  dateStringToDate,
-  formatDuration,
-} from '@/utils/rounding';
+import { dateToTimeString, dateToDateString, dateStringToDate, formatDuration } from '@/utils/time';
+import { calcDurationMinutes, computeAmount, resolveRateOnEdit } from '@/utils/calculations';
 
 export default function EntryScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const companies = useAppStore((s) => s.companies);
-  const settings = useAppStore((s) => s.settings);
   const refreshBalance = useAppStore((s) => s.refreshBalance);
+  const showUndo = useAppStore((s) => s.showUndo);
   const { colors } = useAppColors();
   const styles = useMemo(() => getStyles(colors), [colors]);
   const { show: showDialog, dialogNode } = useDialog();
 
   const [entry, setEntry] = useState<WorkEntry | null>(null);
+  const [entryCompany, setEntryCompany] = useState<Company | null>(null);
   const [isLocked, setIsLocked] = useState(false);
   const [lockWarningShown, setLockWarningShown] = useState(false);
+
+  // Active companies plus this entry's own company if it has since been archived,
+  // so editing an old entry never silently reassigns it to another company.
+  const companyOptions = useMemo(() => {
+    if (entryCompany && !companies.some((c) => c.id === entryCompany.id)) {
+      return [...companies, entryCompany];
+    }
+    return companies;
+  }, [companies, entryCompany]);
 
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -49,7 +54,6 @@ export default function EntryScreen() {
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
   const [note, setNote] = useState('');
-  const [showUndoToast, setShowUndoToast] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -57,6 +61,7 @@ export default function EntryScreen() {
     const e = db.getFirstSync<WorkEntry>('SELECT * FROM work_entries WHERE id = ?', [Number(id)]);
     if (e) {
       setEntry(e);
+      setEntryCompany(getCompanyById(e.company_id));
       setIsLocked(e.is_locked === 1);
       setSelectedDate(dateStringToDate(e.date));
       setSelectedCompanyId(e.company_id);
@@ -72,48 +77,50 @@ export default function EntryScreen() {
     }
   }, [id]);
 
-  useEffect(() => {
-    if (companies.length === 1) {
-      const onlyCompanyId = companies[0].id;
-      if (selectedCompanyId !== onlyCompanyId) {
-        setSelectedCompanyId(onlyCompanyId);
-      }
-      return;
-    }
-
-    if (companies.length > 1 && selectedCompanyId !== null && !companies.some((c) => c.id === selectedCompanyId)) {
-      setSelectedCompanyId(companies[0].id);
-    }
-  }, [companies, selectedCompanyId]);
-
   const startStr = dateToTimeString(startTime);
   const endStr = dateToTimeString(endTime);
-  const rawMinutes = calcRawDuration(startStr, endStr);
-  const rounded =
-    rawMinutes > 0
-      ? roundMinutes(rawMinutes, settings.roundingUnit, settings.roundingDirection)
-      : 0;
-  const previewAmount =
-    rounded > 0
-      ? (rounded / 60) * (companies.find((c) => c.id === selectedCompanyId)?.hourly_rate ?? 0)
-      : 0;
+  const durationMinutes = calcDurationMinutes(startStr, endStr);
+  const selectedCompany = companyOptions.find((c) => c.id === selectedCompanyId);
+  // The rate that will actually be billed on save: the entry keeps its frozen
+  // rate unless it is moved to a different company.
+  const effectiveRate = entry
+    ? resolveRateOnEdit(
+        entry.hourly_rate,
+        entry.company_id,
+        selectedCompanyId ?? entry.company_id,
+        selectedCompany?.hourly_rate ?? 0
+      )
+    : selectedCompany?.hourly_rate ?? 0;
+  const previewAmount = computeAmount(durationMinutes, effectiveRate);
 
   const doSave = () => {
-    if (rawMinutes <= 0) {
+    if (durationMinutes <= 0) {
       showDialog({ title: 'Ongeldige tijd', message: 'Eindtijd moet na starttijd liggen.' });
       return;
     }
     if (!entry || !selectedCompanyId) return;
-    const company = companies.find((c) => c.id === selectedCompanyId);
+    const company = companyOptions.find((c) => c.id === selectedCompanyId);
     if (!company) return;
     const dateStr = dateToDateString(selectedDate);
-    const amount = (rounded / 60) * company.hourly_rate;
+    const rate = resolveRateOnEdit(
+      entry.hourly_rate,
+      entry.company_id,
+      selectedCompanyId,
+      company.hourly_rate
+    );
+    const amount = computeAmount(durationMinutes, rate);
     try {
-      updateWorkEntry(entry.id, dateStr, selectedCompanyId, startStr, endStr, note, rounded, amount);
-      if (isLocked) {
-        const db = getDb();
-        db.runSync('UPDATE work_entries SET is_locked = 0 WHERE id = ?', [entry.id]);
-      }
+      updateWorkEntry(
+        entry.id,
+        dateStr,
+        selectedCompanyId,
+        startStr,
+        endStr,
+        note,
+        durationMinutes,
+        rate,
+        amount
+      );
       refreshBalance();
       router.back();
     } catch {
@@ -126,7 +133,7 @@ export default function EntryScreen() {
       showDialog({
         title: 'Dienst al uitbetaald',
         message:
-          'Deze registratie is al uitbetaald. Weet je zeker dat je dit wilt wijzigen? Dit beinvloedt je openstaande saldo.',
+          'Deze dienst is al uitbetaald. Weet je zeker dat je dit wilt wijzigen? Dit beïnvloedt je openstaande saldo.',
         buttons: [
           { text: 'Annuleren', style: 'cancel' },
           {
@@ -146,20 +153,13 @@ export default function EntryScreen() {
 
   const handleDelete = () => {
     if (!entry) return;
-    deleteWorkEntry(entry.id);
+    const deletedId = entry.id;
+    deleteWorkEntry(deletedId);
     refreshBalance();
-    setShowUndoToast(true);
-  };
-
-  const handleUndoDelete = () => {
-    if (!entry) return;
-    restoreWorkEntry(entry.id);
-    refreshBalance();
-    setShowUndoToast(false);
-  };
-
-  const handleToastDismiss = () => {
-    setShowUndoToast(false);
+    showUndo('Dienst verwijderd', () => {
+      restoreWorkEntry(deletedId);
+      refreshBalance();
+    });
     router.back();
   };
 
@@ -190,7 +190,7 @@ export default function EntryScreen() {
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.headerSection}>
-          <Text style={styles.headerTitle}>Dienst Bewerken</Text>
+          <Text style={styles.headerTitle}>Dienst bewerken</Text>
           <TouchableOpacity style={styles.dateSelector} onPress={() => setShowDatePicker(true)}>
             <Text style={styles.dateSelectorText}>
               {selectedDate.toLocaleDateString('nl-NL', {
@@ -219,14 +219,14 @@ export default function EntryScreen() {
           </View>
         )}
 
-        {companies.length !== 1 && (
+        {(companyOptions.length !== 1 || !selectedCompany) && (
           <View style={styles.companySection}>
             <Text style={styles.sectionLabel}>BEDRIJF</Text>
-            {companies.length === 0 ? (
+            {companyOptions.length === 0 ? (
               <Text style={styles.helperText}>Voeg eerst een bedrijf toe in Instellingen.</Text>
             ) : (
               <View style={styles.companyRow}>
-                {companies.map((c) => {
+                {companyOptions.map((c) => {
                   const active = selectedCompanyId === c.id;
                   return (
                     <TouchableOpacity
@@ -239,7 +239,7 @@ export default function EntryScreen() {
                       ]}
                       onPress={() => setSelectedCompanyId(c.id)}>
                       <Text style={[styles.companyChipText, active && { color: colors.bg }]}>
-                        {c.name}
+                        {c.deleted_at ? `${c.name} (gearchiveerd)` : c.name}
                       </Text>
                     </TouchableOpacity>
                   );
@@ -283,13 +283,13 @@ export default function EntryScreen() {
             />
           )}
 
-          {rounded > 0 && (
-            <View style={styles.resultBar}>
+          {durationMinutes > 0 && (
+            <Animated.View style={styles.resultBar} entering={FadeInDown.duration(150)}>
               <Text style={styles.resultText}>
-                {formatDuration(rounded)} {'·'}{' '}
+                {formatDuration(durationMinutes)} {'·'}{' '}
                 <Text style={styles.resultAmount}>{formatEuro(previewAmount)}</Text>
               </Text>
-            </View>
+            </Animated.View>
           )}
         </View>
 
@@ -312,12 +312,6 @@ export default function EntryScreen() {
         </View>
       </ScrollView>
 
-      <UndoToast
-        visible={showUndoToast}
-        message="Dienst verwijderd"
-        onUndo={handleUndoDelete}
-        onDismiss={handleToastDismiss}
-      />
       {dialogNode}
     </SafeAreaView>
   );

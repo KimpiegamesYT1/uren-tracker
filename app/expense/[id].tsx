@@ -20,11 +20,10 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { getCompanyDisplayColor } from '@/constants/colors';
 import { useAppStore } from '@/store/use-app-store';
 import { insertExpense, updateExpense, deleteExpense, restoreExpense, getExpenseById } from '@/db/expenses';
-import { getAllCompanies } from '@/db/companies';
+import { getAllCompanies, getCompanyById } from '@/db/companies';
 import { getDb, Expense, Company } from '@/db/schema';
-import { dateToDateString, dateStringToDate } from '@/utils/rounding';
+import { dateToDateString, dateStringToDate } from '@/utils/time';
 import { InAppCamera } from '@/components/in-app-camera';
-import { UndoToast } from '@/components/undo-toast';
 import { useAppColors } from '@/hooks/use-app-colors';
 import { useDialog } from '@/components/ui/app-dialog';
 
@@ -58,6 +57,7 @@ export default function ExpenseScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const refreshBalance = useAppStore((s) => s.refreshBalance);
+  const showUndo = useAppStore((s) => s.showUndo);
   const userName = useAppStore((s) => s.settings.userName);
   const { colors, uiTheme } = useAppColors();
   const styles = useMemo(() => getStyles(colors), [colors]);
@@ -79,18 +79,19 @@ export default function ExpenseScreen() {
   const [showCamera, setShowCamera] = useState(false);
   const [previewUri, setPreviewUri] = useState<string | null>(null);
   const [isSharingExpense, setIsSharingExpense] = useState(false);
-  const [showUndoToast, setShowUndoToast] = useState(false);
 
   useEffect(() => {
     const loaded = getAllCompanies();
-    setCompanies(loaded);
-    if (loaded.length > 0) {
-      setSelectedCompanyId(loaded[0].id);
-    }
 
     if (!isNew) {
       const expense = getExpenseById(Number(id));
       if (expense) {
+        // Keep this expense's company selectable even if it has been archived.
+        const archived =
+          expense.company_id != null && !loaded.some((c) => c.id === expense.company_id)
+            ? getCompanyById(expense.company_id)
+            : null;
+        setCompanies(archived ? [...loaded, archived] : loaded);
         setExistingExpense(expense);
         setIsLocked(expense.is_locked === 1);
         setSelectedDate(dateStringToDate(expense.date));
@@ -98,7 +99,13 @@ export default function ExpenseScreen() {
         setAmount(String(expense.amount));
         setSelectedCompanyId(expense.company_id ?? (loaded[0]?.id ?? null));
         setReceiptUris(expense.receipt_uris || (expense.receipt_photo_uri ? [expense.receipt_photo_uri] : []));
+        return;
       }
+    }
+
+    setCompanies(loaded);
+    if (loaded.length > 0) {
+      setSelectedCompanyId(loaded[0].id);
     }
   }, [id, isNew]);
 
@@ -183,28 +190,13 @@ export default function ExpenseScreen() {
 
   const handleDelete = () => {
     if (!existingExpense) return;
-    deleteExpense(existingExpense.id);
+    const deletedId = existingExpense.id;
+    deleteExpense(deletedId);
     refreshBalance();
-    setShowUndoToast(true);
-  };
-
-  const handleUndoDelete = () => {
-    if (!existingExpense) return;
-    restoreExpense(existingExpense.id);
-    refreshBalance();
-    setShowUndoToast(false);
-  };
-
-  const handleToastDismiss = async () => {
-    setShowUndoToast(false);
-    if (existingExpense) {
-      const photos = existingExpense.receipt_uris || (existingExpense.receipt_photo_uri ? [existingExpense.receipt_photo_uri] : []);
-      for (const photo of photos) {
-        try {
-          await FileSystem.deleteAsync(photo, { idempotent: true });
-        } catch {}
-      }
-    }
+    showUndo('Onkost verwijderd', () => {
+      restoreExpense(deletedId);
+      refreshBalance();
+    });
     router.back();
   };
 
@@ -397,7 +389,7 @@ export default function ExpenseScreen() {
       `;
 
       const pdf = await Print.printToFileAsync({ html });
-      const datePart = selectedDate.toISOString().slice(0, 10);
+      const datePart = dateToDateString(selectedDate);
       const descriptionPart = slugify(description).slice(0, 24) || 'onkosten';
       const shareFileName = `onkosten-${datePart}-${descriptionPart}.pdf`;
       const targetUri = `${FileSystem.cacheDirectory}${shareFileName}`;
@@ -463,7 +455,7 @@ export default function ExpenseScreen() {
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.headerSection}>
-          <Text style={styles.headerTitle}>{isNew ? 'Onkost Toevoegen' : 'Onkost Bewerken'}</Text>
+          <Text style={styles.headerTitle}>{isNew ? 'Onkost toevoegen' : 'Onkost bewerken'}</Text>
           <TouchableOpacity style={styles.dateSelector} onPress={() => setShowDatePicker(true)}>
             <Text style={styles.dateSelectorText}>
               {capitalizeWords(selectedDate.toLocaleDateString('nl-NL', {
@@ -479,7 +471,7 @@ export default function ExpenseScreen() {
 
         {isLocked && (
           <View style={styles.lockBanner}>
-            <Text style={styles.lockBannerText}>🔒 Deze onkost is al uitbetaald</Text>
+            <Text style={styles.lockBannerText}>Deze onkost is al uitbetaald</Text>
           </View>
         )}
         {showDatePicker && (
@@ -517,7 +509,7 @@ export default function ExpenseScreen() {
                           fontWeight: '700',
                         },
                       ]}>
-                      {company.name}
+                      {company.deleted_at ? `${company.name} (gearchiveerd)` : company.name}
                     </Text>
                   </TouchableOpacity>
                 ))}
@@ -590,12 +582,6 @@ export default function ExpenseScreen() {
           <Text style={styles.previewModalHint}>Tik om te sluiten</Text>
         </TouchableOpacity>
       </Modal>
-      <UndoToast
-        visible={showUndoToast}
-        message="Onkost verwijderd"
-        onUndo={handleUndoDelete}
-        onDismiss={handleToastDismiss}
-      />
       {dialogNode}
     </SafeAreaView>
   );
