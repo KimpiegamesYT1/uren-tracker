@@ -11,8 +11,6 @@ staat lokaal in een SQLite-database op je telefoon — geen account, geen server
   <img src="docs/screens.svg" alt="Uren registreren, saldo en maandoverzicht" width="100%">
 </p>
 
-<p align="center"><sub>Ontwerpweergave van de schermen — bedrijfsnamen zijn voorbeelden.</sub></p>
-
 ## Wat je met de app kunt
 
 - **Uren registreren** per bedrijf, met start- en eindtijd
