@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { formatEuro, getCompanyDisplayColor } from '@/constants/colors';
 import { getWorkEntriesByMonth } from '@/db/work-entries';
 import { WorkEntry } from '@/db/schema';
-import { dateStringToDate, formatDuration } from '@/utils/rounding';
+import { dateStringToDate, formatDuration } from '@/utils/time';
+import { sumAmounts } from '@/utils/calculations';
 import { useAppColors } from '@/hooks/use-app-colors';
 import { useAppStore } from '@/store/use-app-store';
 
@@ -41,35 +42,36 @@ export default function MonthDetailScreen() {
 
   const [year, month] = (id ?? '').split('-').map(Number);
   const [items, setItems] = useState<WorkEntry[]>([]);
-  const [totalHours, setTotalHours] = useState(0);
+  const [totalMinutes, setTotalMinutes] = useState(0);
   const [totalAmount, setTotalAmount] = useState(0);
   const [workedDays, setWorkedDays] = useState(0);
   const showCompanyInTitle = companies.length > 1;
 
-  const workedHours = totalHours / 60;
-  const workedHoursLabel = totalHours === 60 ? 'Uur gewerkt' : 'Uren gewerkt';
   const workedDaysLabel = workedDays === 1 ? 'Dag gewerkt' : 'Dagen gewerkt';
+  const revision = useAppStore((s) => s.revision);
 
-  useFocusEffect(
-    useCallback(() => {
-      if (!year || !month) return;
-      const entries = getWorkEntriesByMonth(year, month);
+  const load = useCallback(() => {
+    if (!year || !month) return;
+    const entries = getWorkEntriesByMonth(year, month);
 
-      let minutesTotal = 0;
-      let amountTotal = 0;
-      const uniqueDays = new Set<string>();
-      for (const entry of entries) {
-        minutesTotal += entry.duration_minutes;
-        amountTotal += entry.amount;
-        uniqueDays.add(entry.date);
-      }
+    let minutesTotal = 0;
+    const uniqueDays = new Set<string>();
+    for (const entry of entries) {
+      minutesTotal += entry.duration_minutes;
+      uniqueDays.add(entry.date);
+    }
 
-      setItems(entries);
-      setTotalHours(minutesTotal);
-      setTotalAmount(amountTotal);
-      setWorkedDays(uniqueDays.size);
-    }, [year, month])
-  );
+    setItems(entries);
+    setTotalMinutes(minutesTotal);
+    setTotalAmount(sumAmounts(entries.map((entry) => entry.amount)));
+    setWorkedDays(uniqueDays.size);
+  }, [year, month]);
+
+  useFocusEffect(load);
+  // Reload when data changes on another screen (e.g. an "Ongedaan maken" restore).
+  useEffect(() => {
+    load();
+  }, [load, revision]);
 
   const renderItem = useCallback(({ item }: { item: WorkEntry }) => {
     const companyName = item.company_name ?? 'Bedrijf';
@@ -106,7 +108,7 @@ export default function MonthDetailScreen() {
           {item.note ? (
             <Text style={styles.itemNote}>{item.note}</Text>
           ) : null}
-          {item.is_locked === 1 ? <Text style={styles.lockText}>🔒 Vergrendeld</Text> : null}
+          {item.is_locked === 1 ? <Text style={styles.lockText}>Betaald</Text> : null}
         </View>
       </TouchableOpacity>
     );
@@ -129,8 +131,8 @@ export default function MonthDetailScreen() {
             <Text style={styles.summaryStatLabel}>Verdiensten</Text>
           </View>
           <View style={styles.summaryStat}>
-            <Text style={styles.summaryStatValue}>{workedHours.toFixed(1)}u</Text>
-            <Text style={styles.summaryStatLabel}>{workedHoursLabel}</Text>
+            <Text style={styles.summaryStatValue}>{formatDuration(totalMinutes)}</Text>
+            <Text style={styles.summaryStatLabel}>Gewerkt</Text>
           </View>
           <View style={styles.summaryStat}>
             <Text style={styles.summaryStatValue}>{workedDays}</Text>
@@ -150,7 +152,7 @@ export default function MonthDetailScreen() {
         updateCellsBatchingPeriod={16}
         removeClippedSubviews
         ListEmptyComponent={
-          <Text style={styles.emptyText}>Geen registraties in deze maand.</Text>
+          <Text style={styles.emptyText}>Geen diensten in deze maand.</Text>
         }
       />
     </SafeAreaView>

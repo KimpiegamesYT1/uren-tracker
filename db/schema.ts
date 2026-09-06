@@ -7,6 +7,7 @@ export type Company = {
   hourly_rate: number;
   color: string;
   created_at: string;
+  deleted_at?: string | null;
 };
 
 export type WorkEntry = {
@@ -18,8 +19,9 @@ export type WorkEntry = {
   start_time: string; // HH:MM
   end_time: string; // HH:MM
   note: string;
-  duration_minutes: number; // after rounding
-  amount: number; // calculated: (duration_minutes / 60) * hourly_rate
+  duration_minutes: number; // raw minutes between start and end
+  hourly_rate: number; // rate frozen when the entry was created
+  amount: number; // computeAmount(duration_minutes, hourly_rate), whole cents
   amount_paid: number;
   is_locked: number; // 0 or 1
   created_at: string;
@@ -73,7 +75,8 @@ function ensureInitialized(db: SQLite.SQLiteDatabase): void {
       name TEXT NOT NULL,
       hourly_rate REAL NOT NULL DEFAULT 0,
       color TEXT NOT NULL DEFAULT '#4CAF50',
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      deleted_at TEXT DEFAULT NULL
     );
 
     CREATE TABLE IF NOT EXISTS work_entries (
@@ -84,10 +87,12 @@ function ensureInitialized(db: SQLite.SQLiteDatabase): void {
       end_time TEXT NOT NULL,
       note TEXT NOT NULL DEFAULT '',
       duration_minutes INTEGER NOT NULL DEFAULT 0,
+      hourly_rate REAL NOT NULL DEFAULT 0,
       amount REAL NOT NULL DEFAULT 0,
       amount_paid REAL NOT NULL DEFAULT 0,
       is_locked INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      deleted_at TEXT DEFAULT NULL,
       FOREIGN KEY (company_id) REFERENCES companies(id)
     );
 
@@ -101,6 +106,7 @@ function ensureInitialized(db: SQLite.SQLiteDatabase): void {
       amount_paid REAL NOT NULL DEFAULT 0,
       is_locked INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      deleted_at TEXT DEFAULT NULL,
       FOREIGN KEY (company_id) REFERENCES companies(id)
     );
 
@@ -126,20 +132,6 @@ function ensureInitialized(db: SQLite.SQLiteDatabase): void {
       FOREIGN KEY (expense_id) REFERENCES expenses(id) ON DELETE CASCADE
     );
 
-    CREATE INDEX IF NOT EXISTS idx_work_entries_date ON work_entries(date);
-    CREATE INDEX IF NOT EXISTS idx_work_entries_unpaid ON work_entries(amount_paid, amount);
-    CREATE INDEX IF NOT EXISTS idx_work_entries_active_date ON work_entries(deleted_at, date);
-    CREATE INDEX IF NOT EXISTS idx_work_entries_active_fifo ON work_entries(deleted_at, date, created_at);
-    CREATE INDEX IF NOT EXISTS idx_work_entries_active_unpaid ON work_entries(deleted_at, amount_paid, amount);
-    CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date);
-    CREATE INDEX IF NOT EXISTS idx_expenses_unpaid ON expenses(amount_paid, amount);
-    CREATE INDEX IF NOT EXISTS idx_expenses_active_date ON expenses(deleted_at, date);
-    CREATE INDEX IF NOT EXISTS idx_expenses_active_fifo ON expenses(deleted_at, date, created_at);
-    CREATE INDEX IF NOT EXISTS idx_expenses_active_unpaid ON expenses(deleted_at, amount_paid, amount);
-    CREATE INDEX IF NOT EXISTS idx_payments_date_created ON payments(date, created_at);
-
-    INSERT OR IGNORE INTO settings (key, value) VALUES ('${SETTINGS_KEYS.roundingUnit}', '1');
-    INSERT OR IGNORE INTO settings (key, value) VALUES ('${SETTINGS_KEYS.roundingDirection}', 'round');
     INSERT OR IGNORE INTO settings (key, value) VALUES ('${SETTINGS_KEYS.theme}', 'dark');
     INSERT OR IGNORE INTO settings (key, value) VALUES ('${SETTINGS_KEYS.userName}', '');
   `);
@@ -154,6 +146,40 @@ function ensureInitialized(db: SQLite.SQLiteDatabase): void {
   // Migration: soft-delete support
   try {
     db.runSync('ALTER TABLE work_entries ADD COLUMN deleted_at TEXT DEFAULT NULL');
+  } catch {
+    // Column already exists; ignore.
+  }
+
+  // Migration: per-entry frozen hourly rate. Older entries stored only the
+  // final `amount`, so reconstruct the rate they were billed at from it.
+  try {
+    db.runSync('ALTER TABLE work_entries ADD COLUMN hourly_rate REAL NOT NULL DEFAULT 0');
+    db.runSync(`
+      UPDATE work_entries
+      SET hourly_rate = ROUND(amount * 60.0 / duration_minutes, 2)
+      WHERE duration_minutes > 0 AND hourly_rate = 0
+    `);
+    // Normalise historical amounts to whole cents so the per-item view and the
+    // summed balance can never disagree by a fraction of a cent.
+    db.runSync('UPDATE work_entries SET amount = ROUND(amount, 2)');
+    db.runSync('UPDATE work_entries SET amount_paid = ROUND(amount_paid, 2)');
+    db.runSync('UPDATE expenses SET amount = ROUND(amount, 2), amount_paid = ROUND(amount_paid, 2)');
+    db.runSync('UPDATE payments SET amount = ROUND(amount, 2)');
+  } catch {
+    // Column already exists; ignore.
+  }
+
+  // Migration: the hours-rounding feature was removed; drop its leftover settings.
+  try {
+    db.runSync("DELETE FROM settings WHERE key IN ('rounding_unit', 'rounding_direction')");
+  } catch {
+    // Table not ready yet; ignore.
+  }
+
+  // Migration: companies are archived instead of hard-deleted, so historical
+  // entries keep resolving their company name, colour and frozen rate.
+  try {
+    db.runSync('ALTER TABLE companies ADD COLUMN deleted_at TEXT DEFAULT NULL');
   } catch {
     // Column already exists; ignore.
   }
@@ -177,6 +203,18 @@ function ensureInitialized(db: SQLite.SQLiteDatabase): void {
   } catch (e) {
     console.error('Migration error for multiple photos:', e);
   }
+
+  // Indexes are created last, after every ALTER above, so an index can safely
+  // reference a column that only exists on already-migrated databases.
+  db.execSync(`
+    CREATE INDEX IF NOT EXISTS idx_work_entries_active_date ON work_entries(deleted_at, date);
+    CREATE INDEX IF NOT EXISTS idx_work_entries_active_fifo ON work_entries(deleted_at, date, created_at);
+    CREATE INDEX IF NOT EXISTS idx_work_entries_active_unpaid ON work_entries(deleted_at, amount_paid, amount);
+    CREATE INDEX IF NOT EXISTS idx_expenses_active_date ON expenses(deleted_at, date);
+    CREATE INDEX IF NOT EXISTS idx_expenses_active_fifo ON expenses(deleted_at, date, created_at);
+    CREATE INDEX IF NOT EXISTS idx_expenses_active_unpaid ON expenses(deleted_at, amount_paid, amount);
+    CREATE INDEX IF NOT EXISTS idx_payments_date_created ON payments(date, created_at);
+  `);
 
   _isInitialized = true;
 }

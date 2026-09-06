@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -11,26 +11,34 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { formatEuro } from '@/constants/colors';
 import { getMonthSummaries } from '@/db/work-entries';
+import { formatDuration } from '@/utils/time';
 import { useAppColors } from '@/hooks/use-app-colors';
+import { useAppStore } from '@/store/use-app-store';
 
 const MONTH_NAMES = [
   '', 'Januari', 'Februari', 'Maart', 'April', 'Mei', 'Juni',
   'Juli', 'Augustus', 'September', 'Oktober', 'November', 'December',
 ];
 
-type MonthSummary = { year: number; month: number; total_hours: number; total_amount: number };
+type MonthSummary = { year: number; month: number; total_minutes: number; total_amount: number };
 
 export default function MonthsScreen() {
   const router = useRouter();
   const { colors } = useAppColors();
   const styles = useMemo(() => getStyles(colors), [colors]);
   const [summaries, setSummaries] = useState<MonthSummary[]>([]);
+  const revision = useAppStore((s) => s.revision);
 
   useFocusEffect(
     useCallback(() => {
       setSummaries(getMonthSummaries());
     }, [])
   );
+
+  // Reload when data changes on another screen (e.g. an "Ongedaan maken" restore).
+  useEffect(() => {
+    setSummaries(getMonthSummaries());
+  }, [revision]);
 
   const renderItem = useCallback(({ item }: { item: MonthSummary }) => (
     <TouchableOpacity
@@ -42,7 +50,7 @@ export default function MonthsScreen() {
       </View>
       <View style={styles.cardRight}>
         <Text style={styles.cardAmount}>{formatEuro(item.total_amount)}</Text>
-        <Text style={styles.cardHours}>{item.total_hours.toFixed(1)}u</Text>
+        <Text style={styles.cardHours}>{formatDuration(item.total_minutes)}</Text>
       </View>
     </TouchableOpacity>
   ), [router, styles]);

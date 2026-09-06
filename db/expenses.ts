@@ -1,4 +1,6 @@
 import { getDb, Expense } from './schema';
+import { recalculateAllPayments } from './payments';
+import { MONEY_EPSILON, roundMoney } from '../utils/calculations';
 
 function parseExpenseRow(row: any): Expense {
   return {
@@ -50,7 +52,7 @@ export function getAllUnpaidExpenses(): Expense[] {
   const db = getDb();
   const rows = db.getAllSync<any>(
     `${expenseSelectQuery}
-     WHERE e.amount_paid < e.amount AND e.deleted_at IS NULL
+     WHERE e.amount - e.amount_paid > ${MONEY_EPSILON} AND e.deleted_at IS NULL
      ORDER BY e.date ASC, e.created_at ASC`
   );
   return rows.map(parseExpenseRow);
@@ -68,7 +70,7 @@ export function insertExpense(
   db.withTransactionSync(() => {
     const result = db.runSync(
       'INSERT INTO expenses (date, company_id, description, amount, receipt_photo_uri) VALUES (?, ?, ?, ?, ?)',
-      [date, companyId ?? null, description, amount, receiptUris.length > 0 ? receiptUris[0] : null]
+      [date, companyId ?? null, description, roundMoney(amount), receiptUris.length > 0 ? receiptUris[0] : null]
     );
     expenseId = result.lastInsertRowId;
     receiptUris.forEach((uri, index) => {
@@ -78,6 +80,7 @@ export function insertExpense(
       );
     });
   });
+  recalculateAllPayments();
   return expenseId;
 }
 
@@ -93,7 +96,7 @@ export function updateExpense(
   db.withTransactionSync(() => {
     db.runSync(
       'UPDATE expenses SET date = ?, company_id = ?, description = ?, amount = ?, receipt_photo_uri = ? WHERE id = ?',
-      [date, companyId ?? null, description, amount, receiptUris.length > 0 ? receiptUris[0] : null, id]
+      [date, companyId ?? null, description, roundMoney(amount), receiptUris.length > 0 ? receiptUris[0] : null, id]
     );
     db.runSync('DELETE FROM expense_receipt_photos WHERE expense_id = ?', [id]);
     receiptUris.forEach((uri, index) => {
@@ -103,22 +106,17 @@ export function updateExpense(
       );
     });
   });
-}
-
-export function updateExpensePayment(id: number, amountPaid: number, isLocked: number): void {
-  const db = getDb();
-  db.runSync(
-    'UPDATE expenses SET amount_paid = ?, is_locked = ? WHERE id = ?',
-    [amountPaid, isLocked, id]
-  );
+  recalculateAllPayments();
 }
 
 export function deleteExpense(id: number): void {
   const db = getDb();
   db.runSync("UPDATE expenses SET deleted_at = datetime('now') WHERE id = ?", [id]);
+  recalculateAllPayments();
 }
 
 export function restoreExpense(id: number): void {
   const db = getDb();
   db.runSync('UPDATE expenses SET deleted_at = NULL WHERE id = ?', [id]);
+  recalculateAllPayments();
 }

@@ -28,7 +28,7 @@ import { useDialog } from '@/components/ui/app-dialog';
 import { getMonthSummaries } from '@/db/work-entries';
 
 type CompanyFormState = { name: string; hourlyRate: string; color: string };
-type MonthSummary = { year: number; month: number; total_hours: number; total_amount: number };
+type MonthSummary = { year: number; month: number; total_minutes: number; total_amount: number };
 
 const MONTH_NAMES = [
   '', 'Januari', 'Februari', 'Maart', 'April', 'Mei', 'Juni',
@@ -120,7 +120,7 @@ export default function SettingsScreen() {
   const confirmDeleteCompany = (company: Company) => {
     showDialog({
       title: 'Bedrijf verwijderen',
-      message: `Weet je zeker dat je "${company.name}" wilt verwijderen? Bestaande diensten worden niet verwijderd.`,
+      message: `"${company.name}" wordt gearchiveerd en verdwijnt uit de keuzelijsten. Bestaande diensten, bedragen en betalingen blijven behouden.`,
       buttons: [
         { text: 'Annuleren', style: 'cancel' },
         {
@@ -253,68 +253,13 @@ export default function SettingsScreen() {
               <TouchableOpacity
                 onPress={() => confirmDeleteCompany(company)}
                 hitSlop={{ top: 8, bottom: 8, left: 16, right: 8 }}>
-                <Text style={styles.deleteText}>x</Text>
+                <Text style={styles.deleteText}>×</Text>
               </TouchableOpacity>
             </TouchableOpacity>
           ))}
           <TouchableOpacity style={styles.addButton} onPress={openAddCompany}>
             <Text style={styles.addButtonText}>+ Bedrijf toevoegen</Text>
           </TouchableOpacity>
-        </View>
-
-        <Text style={styles.sectionTitle}>Uren Afronden</Text>
-        <View style={styles.card}>
-          <Text style={styles.helperText}>
-            Bepaalt hoe werktijd wordt afgerond voordat het bedrag wordt berekend.
-          </Text>
-
-          <Text style={styles.optionLabel}>Stapgrootte</Text>
-          <View style={styles.segmented}>
-            {([1, 15, 30] as const).map((unit, index) => (
-              <TouchableOpacity
-                key={unit}
-                style={[
-                  styles.segmentedOption,
-                  index > 0 && styles.segmentedOptionWithSeparator,
-                  settings.roundingUnit === unit && styles.segmentedOptionActive,
-                ]}
-                onPress={() => updateSetting('roundingUnit', unit)}>
-                <Text
-                  style={[
-                    styles.segmentedOptionText,
-                    settings.roundingUnit === unit && styles.segmentedOptionTextActive,
-                  ]}>
-                  {unit === 1 ? 'Exact (minuten)' : unit === 15 ? 'Per kwartier' : 'Per half uur'}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          <Text style={[styles.optionLabel, { marginTop: 14 }]}>Afrondingsmethode</Text>
-          <View style={styles.segmented}>
-            {(['up', 'down', 'round'] as const).map((direction, index) => (
-              <TouchableOpacity
-                key={direction}
-                style={[
-                  styles.segmentedOption,
-                  index > 0 && styles.segmentedOptionWithSeparator,
-                  settings.roundingDirection === direction && styles.segmentedOptionActive,
-                ]}
-                onPress={() => updateSetting('roundingDirection', direction)}>
-                <Text
-                  style={[
-                    styles.segmentedOptionText,
-                    settings.roundingDirection === direction && styles.segmentedOptionTextActive,
-                  ]}>
-                  {direction === 'up'
-                    ? 'Altijd omhoog'
-                    : direction === 'down'
-                      ? 'Altijd omlaag'
-                      : 'Dichtstbijzijnde'}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
         </View>
 
         <Text style={styles.sectionTitle}>Backup & Herstel</Text>
@@ -337,7 +282,7 @@ export default function SettingsScreen() {
 
         <Text style={styles.sectionTitle}>Profiel</Text>
         <View style={styles.card}>
-          <Text style={styles.helperText}>Naam op PDF titel (bijvoorbeeld: Open uren Floris).</Text>
+          <Text style={styles.helperText}>Naam op de PDF-titel (bijvoorbeeld: Open uren Floris).</Text>
           <TextInput
             style={styles.profileInput}
             placeholder="Jouw naam"
@@ -349,7 +294,7 @@ export default function SettingsScreen() {
             style={[styles.backupButton, { marginTop: 10 }]}
             onPress={() => {
               updateSetting('userName', userNameInput.trim());
-              showDialog({ title: 'Opgeslagen', message: 'Naam voor PDF titel is bijgewerkt.' });
+              showDialog({ title: 'Opgeslagen', message: 'Naam voor de PDF-titel is bijgewerkt.' });
             }}>
             <Text style={styles.backupButtonText}>Naam opslaan</Text>
           </TouchableOpacity>
@@ -423,7 +368,7 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={styles.customColorButton}
               onPress={() => setShowColorPickerModal(true)}>
-              <Text style={styles.customColorButtonText}>Aangepaste Kleur</Text>
+              <Text style={styles.customColorButtonText}>Aangepaste kleur</Text>
               <View style={[styles.customColorPreviewDot, { backgroundColor: form.color }]} />
             </TouchableOpacity>
 

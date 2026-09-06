@@ -1,4 +1,6 @@
 import { getDb, WorkEntry } from './schema';
+import { recalculateAllPayments } from './payments';
+import { MONEY_EPSILON, roundMoney } from '../utils/calculations';
 
 export function getWorkEntriesByDate(date: string): WorkEntry[] {
   const db = getDb();
@@ -31,8 +33,9 @@ export function getAllUnpaidWorkEntries(): WorkEntry[] {
     `SELECT we.*, c.name as company_name, c.color as company_color
      FROM work_entries we
      LEFT JOIN companies c ON we.company_id = c.id
-     WHERE we.amount_paid < we.amount AND we.deleted_at IS NULL
-     ORDER BY we.date ASC, we.start_time ASC`
+     WHERE we.amount - we.amount_paid > ? AND we.deleted_at IS NULL
+     ORDER BY we.date ASC, we.start_time ASC`,
+    [MONEY_EPSILON]
   );
 }
 
@@ -56,14 +59,16 @@ export function insertWorkEntry(
   endTime: string,
   note: string,
   durationMinutes: number,
+  hourlyRate: number,
   amount: number
 ): number {
   const db = getDb();
   const result = db.runSync(
-    `INSERT INTO work_entries (date, company_id, start_time, end_time, note, duration_minutes, amount)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [date, companyId, startTime, endTime, note, durationMinutes, amount]
+    `INSERT INTO work_entries (date, company_id, start_time, end_time, note, duration_minutes, hourly_rate, amount)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [date, companyId, startTime, endTime, note, durationMinutes, roundMoney(hourlyRate), roundMoney(amount)]
   );
+  recalculateAllPayments();
   return result.lastInsertRowId;
 }
 
@@ -75,42 +80,43 @@ export function updateWorkEntry(
   endTime: string,
   note: string,
   durationMinutes: number,
+  hourlyRate: number,
   amount: number
 ): void {
   const db = getDb();
   db.runSync(
     `UPDATE work_entries SET date = ?, company_id = ?, start_time = ?, end_time = ?, note = ?,
-     duration_minutes = ?, amount = ? WHERE id = ?`,
-    [date, companyId, startTime, endTime, note, durationMinutes, amount, id]
+     duration_minutes = ?, hourly_rate = ?, amount = ? WHERE id = ?`,
+    [date, companyId, startTime, endTime, note, durationMinutes, roundMoney(hourlyRate), roundMoney(amount), id]
   );
-}
-
-export function updateWorkEntryPayment(id: number, amountPaid: number, isLocked: number): void {
-  const db = getDb();
-  db.runSync(
-    'UPDATE work_entries SET amount_paid = ?, is_locked = ? WHERE id = ?',
-    [amountPaid, isLocked, id]
-  );
+  recalculateAllPayments();
 }
 
 export function deleteWorkEntry(id: number): void {
   const db = getDb();
   db.runSync("UPDATE work_entries SET deleted_at = datetime('now') WHERE id = ?", [id]);
+  recalculateAllPayments();
 }
 
 export function restoreWorkEntry(id: number): void {
   const db = getDb();
   db.runSync('UPDATE work_entries SET deleted_at = NULL WHERE id = ?', [id]);
+  recalculateAllPayments();
 }
 
-export function getMonthSummaries(): { year: number; month: number; total_hours: number; total_amount: number }[] {
+export function getMonthSummaries(): {
+  year: number;
+  month: number;
+  total_minutes: number;
+  total_amount: number;
+}[] {
   const db = getDb();
-  return db.getAllSync<{ year: number; month: number; total_hours: number; total_amount: number }>(
+  return db.getAllSync<{ year: number; month: number; total_minutes: number; total_amount: number }>(
     `SELECT
        CAST(strftime('%Y', date) AS INTEGER) as year,
        CAST(strftime('%m', date) AS INTEGER) as month,
-       ROUND(SUM(duration_minutes) / 60.0, 2) as total_hours,
-       ROUND(SUM(amount), 2) as total_amount
+       COALESCE(SUM(duration_minutes), 0) as total_minutes,
+       ROUND(COALESCE(SUM(amount), 0), 2) as total_amount
      FROM work_entries
      WHERE deleted_at IS NULL
      GROUP BY year, month

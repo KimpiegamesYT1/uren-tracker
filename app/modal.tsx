@@ -18,7 +18,7 @@ import { useAppStore } from '@/store/use-app-store';
 import { insertExpense } from '@/db/expenses';
 import { getAllCompanies } from '@/db/companies';
 import { Company } from '@/db/schema';
-import { dateToDateString, dateStringToDate } from '@/utils/rounding';
+import { dateToDateString, dateStringToDate } from '@/utils/time';
 import { InAppCamera } from '@/components/in-app-camera';
 import { useAppColors } from '@/hooks/use-app-colors';
 import { useDialog } from '@/components/ui/app-dialog';
@@ -144,7 +144,7 @@ export default function ExpenseModalScreen() {
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.headerSection}>
-          <Text style={styles.headerTitle}>Onkost Toevoegen</Text>
+          <Text style={styles.headerTitle}>Onkost toevoegen</Text>
           <TouchableOpacity style={styles.dateSelector} onPress={() => setShowDatePicker(true)}>
             <Text style={styles.dateSelectorText}>
               {capitalizeWords(selectedDate.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' }))}
@@ -235,7 +235,7 @@ export default function ExpenseModalScreen() {
 
         <View style={styles.actionSection}>
           <TouchableOpacity style={styles.primaryButton} onPress={handleSave}>
-            <Text style={styles.primaryButtonText}>Onkost Opslaan</Text>
+            <Text style={styles.primaryButtonText}>Onkost opslaan</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.secondaryButton} onPress={() => router.back()}>

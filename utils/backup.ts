@@ -5,7 +5,9 @@ import { Platform } from 'react-native';
 import { getDb, Expense, WorkEntry } from '../db/schema';
 import { getAllUnpaidWorkEntries, getWorkEntriesByMonth } from '../db/work-entries';
 import { getAllUnpaidExpenses, getExpensesByMonth } from '../db/expenses';
-import { formatDuration } from './rounding';
+import { recalculateAllPayments } from '../db/payments';
+import { formatDuration } from './time';
+import { computeAmount, roundMoney } from './calculations';
 import { formatEuro } from '../constants/colors';
 
 
@@ -85,7 +87,7 @@ export async function saveExportJSONToFiles(): Promise<{ success: boolean; messa
 }
 
 function roundRate(value: number): string {
-  return formatEuro(Number(value.toFixed(2)));
+  return formatEuro(roundMoney(value));
 }
 
 function formatDateWithWeekday(date: string): string {
@@ -141,7 +143,12 @@ function createHoursPdfHtml(scope: HoursPdfScope, userName: string) {
 
       if (row.rowType === 'work') {
         const companyName = row.company_name ?? 'Bedrijf';
-        const usedRate = row.duration_minutes > 0 ? (row.amount * 60) / row.duration_minutes : 0;
+        const usedRate =
+          row.hourly_rate > 0
+            ? row.hourly_rate
+            : row.duration_minutes > 0
+              ? (row.amount * 60) / row.duration_minutes
+              : 0;
         if (!hourlyRatesByCompany.has(companyName)) {
           hourlyRatesByCompany.set(companyName, new Set<string>());
         }
@@ -234,7 +241,7 @@ function createHoursPdfHtml(scope: HoursPdfScope, userName: string) {
       </head>
       <body>
         <h1>${title}</h1>
-        <p class="meta">Geexporteerd op ${new Date().toLocaleString('nl-NL')}</p>
+        <p class="meta">Geëxporteerd op ${new Date().toLocaleString('nl-NL')}</p>
         <table>
           <thead>
             <tr>
@@ -252,12 +259,12 @@ function createHoursPdfHtml(scope: HoursPdfScope, userName: string) {
           </tbody>
         </table>
 
-        <div class="section-title">Uurloon per bedrijf overzicht</div>
+        <div class="section-title">Overzicht uurtarief per bedrijf</div>
         <table>
           <thead>
             <tr>
               <th>Bedrijf</th>
-              <th>Gebruikt uurloon</th>
+              <th>Gebruikt uurtarief</th>
             </tr>
           </thead>
           <tbody>
@@ -352,7 +359,7 @@ export function importFromJSON(json: string): { success: boolean; error?: string
 
     for (const we of data.work_entries as any[]) {
       if (!we.id || !we.date || !we.company_id || !we.start_time || !we.end_time) {
-        return { success: false, error: 'Backup beschadigd: een werkentry mist verplichte velden.' };
+        return { success: false, error: 'Backup beschadigd: een dienst mist verplichte velden.' };
       }
     }
 
@@ -376,23 +383,32 @@ export function importFromJSON(json: string): { success: boolean; error?: string
 
       for (const c of data.companies as any[]) {
         db.runSync(
-          'INSERT INTO companies (id, name, hourly_rate, color, created_at) VALUES (?, ?, ?, ?, ?)',
-          [c.id, c.name, c.hourly_rate, c.color, c.created_at]
+          'INSERT INTO companies (id, name, hourly_rate, color, created_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?)',
+          [c.id, c.name, c.hourly_rate, c.color, c.created_at, c.deleted_at ?? null]
         );
       }
 
       for (const we of data.work_entries as any[]) {
+        // Older backups have no per-entry rate: reconstruct it from the amount.
+        const hourlyRate =
+          typeof we.hourly_rate === 'number' && we.hourly_rate > 0
+            ? roundMoney(we.hourly_rate)
+            : we.duration_minutes > 0
+              ? roundMoney((we.amount * 60) / we.duration_minutes)
+              : 0;
+        const amount =
+          typeof we.amount === 'number' ? we.amount : computeAmount(we.duration_minutes, hourlyRate);
         db.runSync(
-          `INSERT INTO work_entries (id, date, company_id, start_time, end_time, note, duration_minutes, amount, amount_paid, is_locked, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [we.id, we.date, we.company_id, we.start_time, we.end_time, we.note, we.duration_minutes, we.amount, we.amount_paid, we.is_locked, we.created_at]
+          `INSERT INTO work_entries (id, date, company_id, start_time, end_time, note, duration_minutes, hourly_rate, amount, amount_paid, is_locked, created_at, deleted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [we.id, we.date, we.company_id, we.start_time, we.end_time, we.note, we.duration_minutes, hourlyRate, amount, we.amount_paid, we.is_locked, we.created_at, we.deleted_at ?? null]
         );
       }
 
       for (const e of data.expenses as any[]) {
         db.runSync(
-          `INSERT INTO expenses (id, date, company_id, description, amount, receipt_photo_uri, amount_paid, is_locked, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO expenses (id, date, company_id, description, amount, receipt_photo_uri, amount_paid, is_locked, created_at, deleted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             e.id,
             e.date,
@@ -403,6 +419,7 @@ export function importFromJSON(json: string): { success: boolean; error?: string
             e.amount_paid,
             e.is_locked,
             e.created_at,
+            e.deleted_at ?? null,
           ]
         );
       }
@@ -414,13 +431,20 @@ export function importFromJSON(json: string): { success: boolean; error?: string
         );
       }
 
+      const OBSOLETE_SETTING_KEYS = ['rounding_unit', 'rounding_direction'];
       for (const s of data.settings as any[]) {
+        if (OBSOLETE_SETTING_KEYS.includes(s.key)) continue;
         db.runSync(
           'INSERT INTO settings (key, value) VALUES (?, ?)',
           [s.key, s.value]
         );
       }
     });
+
+    // Re-derive every amount_paid / is_locked from the imported payments so the
+    // balance and the per-item view are consistent regardless of what the
+    // backup file contained.
+    recalculateAllPayments();
 
     return { success: true };
   } catch (e: any) {
