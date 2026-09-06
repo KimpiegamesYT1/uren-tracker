@@ -10,6 +10,7 @@ import {
   Platform,
 } from 'react-native';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -20,13 +21,8 @@ import { getExpensesByDate as fetchExpenses } from '@/db/expenses';
 import { useAppColors } from '@/hooks/use-app-colors';
 import { suggestCompanyForDate } from '@/utils/smart-company';
 import { useDialog } from '@/components/ui/app-dialog';
-import {
-  roundMinutes,
-  calcRawDuration,
-  dateToTimeString,
-  dateToDateString,
-  formatDuration,
-} from '@/utils/rounding';
+import { dateToTimeString, dateToDateString, formatDuration } from '@/utils/time';
+import { calcDurationMinutes, computeAmount } from '@/utils/calculations';
 import { WorkEntry, Expense } from '@/db/schema';
 
 function createTimeAt(hours: number, minutes: number): Date {
@@ -38,7 +34,6 @@ function createTimeAt(hours: number, minutes: number): Date {
 export default function HomeScreen() {
   const router = useRouter();
   const companies = useAppStore((s) => s.companies);
-  const settings = useAppStore((s) => s.settings);
   const refreshBalance = useAppStore((s) => s.refreshBalance);
   const { colors, uiTheme } = useAppColors();
   const styles = useMemo(() => getStyles(colors), [colors]);
@@ -71,6 +66,12 @@ export default function HomeScreen() {
       loadDayData();
     }, [loadDayData])
   );
+
+  // Reload when data changes on another screen (e.g. an "Ongedaan maken" restore).
+  const revision = useAppStore((s) => s.revision);
+  useEffect(() => {
+    loadDayData();
+  }, [loadDayData, revision]);
 
   // Auto-suggest only when date changes; keep manual selection stable on the same date.
   useEffect(() => {
@@ -118,19 +119,27 @@ export default function HomeScreen() {
 
     const startStr = dateToTimeString(startTime);
     const endStr = dateToTimeString(endTime);
-    const rawMinutes = calcRawDuration(startStr, endStr);
+    const durationMinutes = calcDurationMinutes(startStr, endStr);
 
-    if (rawMinutes <= 0) {
+    if (durationMinutes <= 0) {
       showDialog({ title: 'Ongeldige tijd', message: 'Eindtijd moet na starttijd liggen.' });
       return;
     }
 
-    const rounded = roundMinutes(rawMinutes, settings.roundingUnit, settings.roundingDirection);
-    const amount = (rounded / 60) * company.hourly_rate;
+    const amount = computeAmount(durationMinutes, company.hourly_rate);
     const dateStr = dateToDateString(selectedDate);
 
     try {
-      insertWorkEntry(dateStr, selectedCompanyId, startStr, endStr, note, rounded, amount);
+      insertWorkEntry(
+        dateStr,
+        selectedCompanyId,
+        startStr,
+        endStr,
+        note,
+        durationMinutes,
+        company.hourly_rate,
+        amount
+      );
       refreshBalance();
       // Prepare form for the next entry with workday defaults.
       setNote('');
@@ -160,12 +169,11 @@ export default function HomeScreen() {
   const previewDuration = () => {
     const startStr = dateToTimeString(startTime);
     const endStr = dateToTimeString(endTime);
-    const raw = calcRawDuration(startStr, endStr);
-    if (raw <= 0) return null;
-    const rounded = roundMinutes(raw, settings.roundingUnit, settings.roundingDirection);
+    const durationMinutes = calcDurationMinutes(startStr, endStr);
+    if (durationMinutes <= 0) return null;
     const company = companies.find((c) => c.id === selectedCompanyId);
-    const amount = company ? (rounded / 60) * company.hourly_rate : 0;
-    return { rounded, amount };
+    const amount = company ? computeAmount(durationMinutes, company.hourly_rate) : 0;
+    return { durationMinutes, amount };
   };
 
   const preview = previewDuration();
@@ -190,7 +198,7 @@ export default function HomeScreen() {
 
           {/* Header context */}
           <View style={styles.headerSection}>
-            <Text style={styles.headerTitle}>Uren Registreren</Text>
+            <Text style={styles.headerTitle}>Uren registreren</Text>
             <TouchableOpacity style={styles.dateSelector} onPress={() => setShowDatePicker(true)}
               accessibilityLabel={`Datum selecteren: ${formatDate(selectedDate)}`}
               accessibilityRole="button">
@@ -296,18 +304,12 @@ export default function HomeScreen() {
             )}
 
             {preview && (
-              <View style={styles.resultBar}>
-                {preview.rounded > 0 ? (
-                  <Text style={styles.resultText}>
-                    {formatDuration(preview.rounded)} ·{' '}
-                    <Text style={styles.resultAmount}>{formatEuro(preview.amount)}</Text>
-                  </Text>
-                ) : (
-                  <Text style={styles.previewWarning}>
-                    Afgerond naar 0 minuten - pas de tijden of afrondingsinstelling aan.
-                  </Text>
-                )}
-              </View>
+              <Animated.View style={styles.resultBar} entering={FadeInDown.duration(150)}>
+                <Text style={styles.resultText}>
+                  {formatDuration(preview.durationMinutes)} ·{' '}
+                  <Text style={styles.resultAmount}>{formatEuro(preview.amount)}</Text>
+                </Text>
+              </Animated.View>
             )}
           </View>
 
@@ -324,13 +326,13 @@ export default function HomeScreen() {
             <TouchableOpacity style={styles.primaryButton} onPress={handleSaveDienst}
               accessibilityLabel="Dienst opslaan"
               accessibilityRole="button">
-              <Text style={styles.primaryButtonText}>Dienst Opslaan</Text>
+              <Text style={styles.primaryButtonText}>Dienst opslaan</Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.secondaryButton} onPress={() => router.push('/modal')}
-              accessibilityLabel="Onkosten toevoegen"
+              accessibilityLabel="Onkost toevoegen"
               accessibilityRole="button">
-              <Text style={styles.secondaryButtonText}>+ Onkosten toevoegen</Text>
+              <Text style={styles.secondaryButtonText}>+ Onkost toevoegen</Text>
             </TouchableOpacity>
           </View>
 
@@ -341,42 +343,48 @@ export default function HomeScreen() {
                 {formatDate(selectedDate)}
               </Text>
 
-              {dayEntries.map((entry) => (
-                <TouchableOpacity
+              {dayEntries.map((entry, index) => (
+                <Animated.View
                   key={`we-${entry.id}`}
-                  style={styles.entryRow}
-                  onPress={() => router.push(`/entry/${entry.id}`)}>
-                  <View style={[styles.entryColorBar, { backgroundColor: getCompanyDisplayColor(entry.company_color ?? colors.accent, uiTheme) }]} />
-                  <View style={styles.entryInfo}>
-                    <Text style={styles.entryTime}>
-                      {entry.start_time} – {entry.end_time}
-                    </Text>
-                    <Text style={styles.entryCompany}>{entry.company_name}</Text>
-                    {entry.note ? <Text style={styles.entryNote}>{entry.note}</Text> : null}
-                  </View>
-                  <View style={styles.entryRight}>
-                    <Text style={styles.entryHours}>{formatDuration(entry.duration_minutes)}</Text>
-                    <Text style={styles.entryAmount}>{formatEuro(entry.amount)}</Text>
-                    {entry.is_locked === 1 && <Text style={styles.lockIcon}>🔒</Text>}
-                  </View>
-                </TouchableOpacity>
+                  entering={FadeInDown.duration(220).delay(Math.min(index, 6) * 35)}>
+                  <TouchableOpacity
+                    style={styles.entryRow}
+                    onPress={() => router.push(`/entry/${entry.id}`)}>
+                    <View style={[styles.entryColorBar, { backgroundColor: getCompanyDisplayColor(entry.company_color ?? colors.accent, uiTheme) }]} />
+                    <View style={styles.entryInfo}>
+                      <Text style={styles.entryTime}>
+                        {entry.start_time} – {entry.end_time}
+                      </Text>
+                      <Text style={styles.entryCompany}>{entry.company_name}</Text>
+                      {entry.note ? <Text style={styles.entryNote}>{entry.note}</Text> : null}
+                    </View>
+                    <View style={styles.entryRight}>
+                      <Text style={styles.entryHours}>{formatDuration(entry.duration_minutes)}</Text>
+                      <Text style={styles.entryAmount}>{formatEuro(entry.amount)}</Text>
+                      {entry.is_locked === 1 && <Text style={styles.lockIcon}>Betaald</Text>}
+                    </View>
+                  </TouchableOpacity>
+                </Animated.View>
               ))}
 
-              {dayExpenses.map((exp) => (
-                <TouchableOpacity
+              {dayExpenses.map((exp, index) => (
+                <Animated.View
                   key={`exp-${exp.id}`}
-                  style={styles.entryRow}
-                  onPress={() => router.push(`/expense/${exp.id}`)}>
-                  <View style={[styles.entryColorBar, { backgroundColor: colors.info }]} />
-                  <View style={styles.entryInfo}>
-                    <Text style={styles.entryTime}>Onkost</Text>
-                    <Text style={styles.entryCompany}>{exp.description}</Text>
-                  </View>
-                  <View style={styles.entryRight}>
-                    <Text style={styles.entryAmount}>{formatEuro(exp.amount)}</Text>
-                    {exp.is_locked === 1 && <Text style={styles.lockIcon}>🔒</Text>}
-                  </View>
-                </TouchableOpacity>
+                  entering={FadeInDown.duration(220).delay(Math.min(index, 6) * 35)}>
+                  <TouchableOpacity
+                    style={styles.entryRow}
+                    onPress={() => router.push(`/expense/${exp.id}`)}>
+                    <View style={[styles.entryColorBar, { backgroundColor: colors.info }]} />
+                    <View style={styles.entryInfo}>
+                      <Text style={styles.entryTime}>Onkost</Text>
+                      <Text style={styles.entryCompany}>{exp.description}</Text>
+                    </View>
+                    <View style={styles.entryRight}>
+                      <Text style={styles.entryAmount}>{formatEuro(exp.amount)}</Text>
+                      {exp.is_locked === 1 && <Text style={styles.lockIcon}>Betaald</Text>}
+                    </View>
+                  </TouchableOpacity>
+                </Animated.View>
               ))}
             </View>
           )}
@@ -476,12 +484,6 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
   },
   resultText: { fontSize: 16, color: colors.textSecondary, fontWeight: '500' },
   resultAmount: { color: colors.textPrimary, fontWeight: '700' },
-  previewWarning: {
-    color: colors.warning,
-    fontWeight: '600',
-    fontSize: 13,
-    textAlign: 'center',
-  },
 
   actionSection: { gap: 12, marginBottom: 24 },
   modernInput: {
@@ -527,6 +529,6 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
   entryRight: { padding: 12, alignItems: 'flex-end', gap: 2 },
   entryHours: { color: colors.textSecondary, fontSize: 12 },
   entryAmount: { color: colors.textPrimary, fontWeight: '700', fontSize: 15 },
-  lockIcon: { fontSize: 12 },
+  lockIcon: { color: colors.textSecondary, fontSize: 11, fontWeight: '700', marginTop: 2 },
 });
 }

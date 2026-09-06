@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 
 import { formatEuro, getCompanyDisplayColor } from '@/constants/colors';
 import { useAppStore } from '@/store/use-app-store';
@@ -17,9 +18,10 @@ import { useAppColors } from '@/hooks/use-app-colors';
 import { useDialog } from '@/components/ui/app-dialog';
 import { getAllUnpaidWorkEntries } from '@/db/work-entries';
 import { getAllUnpaidExpenses } from '@/db/expenses';
-import { getAllPayments, insertPayment, applyPayment, deletePaymentAndRecalculate, updatePayment } from '@/db/payments';
+import { getAllPayments, insertPaymentAndRecalculate, deletePaymentAndRecalculate, updatePayment } from '@/db/payments';
 import { WorkEntry, Expense, Payment } from '@/db/schema';
-import { dateToDateString, dateStringToDate, formatDuration } from '@/utils/rounding';
+import { dateToDateString, dateStringToDate, formatDuration } from '@/utils/time';
+import { openAmount } from '@/utils/calculations';
 
 type UnpaidItem =
   | (WorkEntry & { itemType: 'work' })
@@ -105,10 +107,18 @@ export default function BalanceScreen() {
 
   const [showPayModal, setShowPayModal] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentNote, setPaymentNote] = useState('');
+  const [paymentDate, setPaymentDate] = useState(new Date());
+  const [showPayDatePicker, setShowPayDatePicker] = useState(false);
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
   const [editAmount, setEditAmount] = useState('');
   const [editNote, setEditNote] = useState('');
+  const [editDate, setEditDate] = useState(new Date());
+  const [showEditDatePicker, setShowEditDatePicker] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  const formatModalDate = (d: Date) =>
+    d.toLocaleDateString('nl-NL', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' });
 
   const loadData = useCallback(() => {
     const workItems = getAllUnpaidWorkEntries().map((w) => ({ ...w, itemType: 'work' as const }));
@@ -130,6 +140,27 @@ export default function BalanceScreen() {
     }, [loadData])
   );
 
+  // Reload when data changes on another screen (e.g. an "Ongedaan maken" restore).
+  const revision = useAppStore((s) => s.revision);
+  useEffect(() => {
+    loadData();
+  }, [loadData, revision]);
+
+  const openPayModal = () => {
+    setPaymentAmount('');
+    setPaymentNote('');
+    setPaymentDate(new Date());
+    setShowPayDatePicker(false);
+    setShowPayModal(true);
+  };
+
+  const closePayModal = () => {
+    setShowPayModal(false);
+    setShowPayDatePicker(false);
+    setPaymentAmount('');
+    setPaymentNote('');
+  };
+
   const handlePayment = () => {
     const amount = parseFloat(paymentAmount.replace(',', '.'));
     if (isNaN(amount) || amount <= 0) {
@@ -137,12 +168,9 @@ export default function BalanceScreen() {
       return;
     }
     try {
-      const today = dateToDateString(new Date());
-      insertPayment(today, amount, '');
-      applyPayment(amount);
+      insertPaymentAndRecalculate(dateToDateString(paymentDate), amount, paymentNote.trim());
       refreshBalance();
-      setPaymentAmount('');
-      setShowPayModal(false);
+      closePayModal();
       loadData();
     } catch {
       showDialog({ title: 'Fout', message: 'Kon de betaling niet verwerken. Probeer het opnieuw.' });
@@ -153,6 +181,16 @@ export default function BalanceScreen() {
     setEditingPayment(payment);
     setEditAmount(String(payment.amount).replace('.', ','));
     setEditNote(payment.note || '');
+    setEditDate(dateStringToDate(payment.date));
+    setShowEditDatePicker(false);
+    setShowDeleteConfirm(false);
+  };
+
+  const closeEditPayment = () => {
+    setEditingPayment(null);
+    setEditAmount('');
+    setEditNote('');
+    setShowEditDatePicker(false);
     setShowDeleteConfirm(false);
   };
 
@@ -164,10 +202,8 @@ export default function BalanceScreen() {
       return;
     }
     try {
-      updatePayment(editingPayment.id, amount, editNote);
-      setEditingPayment(null);
-      setEditAmount('');
-      setEditNote('');
+      updatePayment(editingPayment.id, amount, editNote.trim(), dateToDateString(editDate));
+      closeEditPayment();
       loadData();
     } catch {
       showDialog({ title: 'Fout', message: 'Kon de betaling niet bijwerken. Probeer het opnieuw.' });
@@ -177,15 +213,12 @@ export default function BalanceScreen() {
   const handleDeletePayment = () => {
     if (!editingPayment) return;
     deletePaymentAndRecalculate(editingPayment.id);
-    setEditingPayment(null);
-    setEditAmount('');
-    setEditNote('');
-    setShowDeleteConfirm(false);
+    closeEditPayment();
     loadData();
   };
 
   const renderUnpaidItem = useCallback(({ item }: { item: UnpaidItem }) => {
-    const remaining = item.amount - item.amount_paid;
+    const remaining = openAmount(item.amount, item.amount_paid);
     const isPartial = item.amount_paid > 0;
     const formattedDate = formatDisplayDate(item.date);
     const isWork = item.itemType === 'work';
@@ -259,7 +292,7 @@ export default function BalanceScreen() {
         <View style={styles.listItemContent}>
           <View style={styles.listItemTopRow}>
             <Text style={styles.listItemTitle}>
-              {item.note || 'Contante betaling'}
+              {item.note || 'Betaling'}
             </Text>
             <Text style={styles.listItemAmount}>
               {formatEuro(item.amount)}
@@ -279,15 +312,21 @@ export default function BalanceScreen() {
       {/* Balance header */}
       <View style={styles.balanceHeader}>
         <Text style={styles.balanceLabel}>
-          {balance < 0 ? 'Te veel ontvangen' : 'Nog te ontvangen'}
+          {balance < 0 ? (
+            <>
+              Te <Text style={styles.balanceLabelAlert}>veel</Text> ontvangen
+            </>
+          ) : (
+            'Nog te ontvangen'
+          )}
         </Text>
         <Text style={styles.balanceAmount}>
-          {formatEuro(balance)}
+          {formatEuro(Math.abs(balance))}
         </Text>
-        <TouchableOpacity style={styles.payButton} onPress={() => setShowPayModal(true)}
+        <TouchableOpacity style={styles.payButton} onPress={openPayModal}
           accessibilityLabel="Betaling ontvangen"
           accessibilityRole="button">
-          <Text style={styles.payButtonText}>Betaling Ontvangen</Text>
+          <Text style={styles.payButtonText}>Betaling ontvangen</Text>
         </TouchableOpacity>
       </View>
 
@@ -352,26 +391,68 @@ export default function BalanceScreen() {
       <Modal visible={showPayModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Betaling Ontvangen</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Bedrag in euro (bijv. 150,00)"
-              placeholderTextColor={colors.textDisabled}
-              keyboardType="decimal-pad"
-              value={paymentAmount}
-              onChangeText={setPaymentAmount}
-              autoFocus
-            />
+            <Text style={styles.modalTitle}>Betaling ontvangen</Text>
+
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>Bedrag</Text>
+              <View style={styles.fieldBox}>
+                <Text style={styles.fieldPrefix}>€</Text>
+                <TextInput
+                  style={styles.amountInput}
+                  placeholder="0,00"
+                  placeholderTextColor={colors.textDisabled}
+                  keyboardType="decimal-pad"
+                  value={paymentAmount}
+                  onChangeText={setPaymentAmount}
+                  autoFocus
+                />
+              </View>
+            </View>
+
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>Ontvangen op</Text>
+              <TouchableOpacity
+                style={styles.fieldBox}
+                onPress={() => setShowPayDatePicker(true)}
+                accessibilityRole="button"
+                accessibilityLabel={`Betaaldatum: ${formatModalDate(paymentDate)}`}>
+                <Text style={styles.fieldValue}>{formatModalDate(paymentDate)}</Text>
+                <Text style={styles.fieldChevron}>▾</Text>
+              </TouchableOpacity>
+            </View>
+            {showPayDatePicker && (
+              <DateTimePicker
+                value={paymentDate}
+                mode="date"
+                display="default"
+                maximumDate={new Date()}
+                onChange={(_: DateTimePickerEvent, date?: Date) => {
+                  setShowPayDatePicker(false);
+                  if (date) setPaymentDate(date);
+                }}
+              />
+            )}
+
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>Notitie</Text>
+              <View style={styles.fieldBox}>
+                <TextInput
+                  style={styles.noteInput}
+                  placeholder="Optioneel"
+                  placeholderTextColor={colors.textDisabled}
+                  value={paymentNote}
+                  onChangeText={setPaymentNote}
+                />
+              </View>
+            </View>
+
             <Text style={styles.modalHint}>
               De oudste openstaande posten worden automatisch afgestreept.
             </Text>
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={[styles.modalBtn, styles.modalBtnCancel]}
-                onPress={() => {
-                  setShowPayModal(false);
-                  setPaymentAmount('');
-                }}>
+                onPress={closePayModal}>
                 <Text style={styles.modalBtnCancelText}>Annuleren</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.modalBtn, styles.modalBtnConfirm]} onPress={handlePayment}>
@@ -386,24 +467,61 @@ export default function BalanceScreen() {
       <Modal visible={editingPayment !== null} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Betaling Bewerken</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Bedrag in euro (bijv. 150,00)"
-              placeholderTextColor={colors.textDisabled}
-              keyboardType="decimal-pad"
-              value={editAmount}
-              onChangeText={setEditAmount}
-              autoFocus
-            />
-            <Text style={styles.modalHint}>Bedrag in euro (EUR).</Text>
-            <TextInput
-              style={[styles.modalInput, { fontSize: 16, fontWeight: '400' }]}
-              placeholder="Notitie (optioneel)"
-              placeholderTextColor={colors.textDisabled}
-              value={editNote}
-              onChangeText={setEditNote}
-            />
+            <Text style={styles.modalTitle}>Betaling bewerken</Text>
+
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>Bedrag</Text>
+              <View style={styles.fieldBox}>
+                <Text style={styles.fieldPrefix}>€</Text>
+                <TextInput
+                  style={styles.amountInput}
+                  placeholder="0,00"
+                  placeholderTextColor={colors.textDisabled}
+                  keyboardType="decimal-pad"
+                  value={editAmount}
+                  onChangeText={setEditAmount}
+                  autoFocus
+                />
+              </View>
+            </View>
+
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>Ontvangen op</Text>
+              <TouchableOpacity
+                style={styles.fieldBox}
+                onPress={() => setShowEditDatePicker(true)}
+                accessibilityRole="button"
+                accessibilityLabel={`Betaaldatum: ${formatModalDate(editDate)}`}>
+                <Text style={styles.fieldValue}>{formatModalDate(editDate)}</Text>
+                <Text style={styles.fieldChevron}>▾</Text>
+              </TouchableOpacity>
+            </View>
+            {showEditDatePicker && (
+              <DateTimePicker
+                value={editDate}
+                mode="date"
+                display="default"
+                maximumDate={new Date()}
+                onChange={(_: DateTimePickerEvent, date?: Date) => {
+                  setShowEditDatePicker(false);
+                  if (date) setEditDate(date);
+                }}
+              />
+            )}
+
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>Notitie</Text>
+              <View style={styles.fieldBox}>
+                <TextInput
+                  style={styles.noteInput}
+                  placeholder="Optioneel"
+                  placeholderTextColor={colors.textDisabled}
+                  value={editNote}
+                  onChangeText={setEditNote}
+                />
+              </View>
+            </View>
+
             {showDeleteConfirm ? (
               <View style={styles.deleteConfirmBox}>
                 <Text style={styles.deleteConfirmText}>
@@ -429,12 +547,7 @@ export default function BalanceScreen() {
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalBtn, styles.modalBtnCancel]}
-                onPress={() => {
-                  setEditingPayment(null);
-                  setEditAmount('');
-                  setEditNote('');
-                  setShowDeleteConfirm(false);
-                }}>
+                onPress={closeEditPayment}>
                 <Text style={styles.modalBtnCancelText}>Annuleren</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.modalBtn, styles.modalBtnConfirm]} onPress={handleEditPayment}>
@@ -461,6 +574,7 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
     gap: 8,
   },
   balanceLabel: { color: colors.textSecondary, fontSize: 14, textTransform: 'uppercase', letterSpacing: 1 },
+  balanceLabelAlert: { color: colors.error, fontWeight: '700' },
   balanceAmount: { color: colors.textPrimary, fontSize: 42, fontWeight: '800', letterSpacing: -1 },
   payButton: {
     backgroundColor: colors.accentSecondary,
@@ -528,14 +642,33 @@ function getStyles(colors: ReturnType<typeof useAppColors>['colors']) {
     gap: 14,
   },
   modalTitle: { color: colors.textPrimary, fontSize: 20, fontWeight: '700' },
-  modalInput: {
+
+  // Form fields — every field is a label above an identical control box.
+  field: { gap: 6 },
+  fieldLabel: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  fieldBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 52,
+    paddingHorizontal: 14,
     backgroundColor: colors.surface,
     borderRadius: 10,
-    padding: 14,
-    fontSize: 22,
-    color: colors.textPrimary,
-    fontWeight: '700',
+    borderWidth: 1,
+    borderColor: colors.border,
   },
+  fieldPrefix: { color: colors.textSecondary, fontSize: 18, fontWeight: '700' },
+  amountInput: { flex: 1, paddingVertical: 12, color: colors.textPrimary, fontSize: 20, fontWeight: '700' },
+  noteInput: { flex: 1, paddingVertical: 12, color: colors.textPrimary, fontSize: 15 },
+  fieldValue: { flex: 1, color: colors.textPrimary, fontSize: 15, fontWeight: '600', textTransform: 'capitalize' },
+  fieldChevron: { color: colors.textSecondary, fontSize: 13 },
+
   modalHint: { color: colors.textSecondary, fontSize: 13 },
   modalButtons: { flexDirection: 'row', gap: 10 },
   modalBtn: { flex: 1, borderRadius: 10, padding: 14, alignItems: 'center' },
